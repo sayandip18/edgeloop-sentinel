@@ -1,0 +1,9 @@
+# Identity for the fix agent (Phase 7). It has NO cluster access: there is
+# deliberately no Role or ClusterRole bound to it. Its only power is a
+# repo-scoped Git credential, which lives outside the cluster.
+# The ServiceAccount exists only so we can issue a token and prove it is denied.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fixer
+  namespace: observability

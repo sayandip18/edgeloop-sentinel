@@ -1,0 +1,38 @@
+# Read-only identity for the diagnosis agent (Phase 6).
+# The ClusterRole only defines the permission set; it is bound with a RoleBinding
+# in `apps` only, so the diagnoser sees nothing outside the workload namespace.
+# No secrets, no write verbs, no exec, no nodes.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: diagnoser
+  namespace: observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edgeloop-diagnoser-read
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, events, configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: ["events.k8s.io"]
+    resources: [events]
+    verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: edgeloop-diagnoser-read
+  namespace: apps
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edgeloop-diagnoser-read
+subjects:
+  - kind: ServiceAccount
+    name: diagnoser
+    namespace: observability

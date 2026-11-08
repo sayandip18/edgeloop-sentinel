@@ -1,0 +1,36 @@
+# Identity Flux uses to apply apps (via spec.serviceAccountName on each
+# Flux Kustomization). The ServiceAccount lives in flux-system (Flux impersonates it from the
+# Kustomization's namespace) but its Role exists only in `apps`. Limited to that namespace and the kinds the
+# demo apps use; Flux itself impersonates it. Nothing else holds write access.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deployer
+  namespace: flux-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: edgeloop-deployer
+  namespace: apps
+rules:
+  - apiGroups: [""]
+    resources: [configmaps, services]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["apps"]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: edgeloop-deployer
+  namespace: apps
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: edgeloop-deployer
+subjects:
+  - kind: ServiceAccount
+    name: deployer
+    namespace: flux-system

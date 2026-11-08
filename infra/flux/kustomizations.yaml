@@ -15,6 +15,7 @@ spec:
     name: edgeloop-sentinel
   path: ./apps/oom-app/overlays/healthy
   targetNamespace: apps
+  serviceAccountName: deployer
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
@@ -32,6 +33,7 @@ spec:
     name: edgeloop-sentinel
   path: ./apps/badconfig-app/overlays/healthy
   targetNamespace: apps
+  serviceAccountName: deployer
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
@@ -49,6 +51,7 @@ spec:
     name: edgeloop-sentinel
   path: ./apps/crash-app/overlays/healthy
   targetNamespace: apps
+  serviceAccountName: deployer
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
@@ -66,3 +69,4 @@ spec:
     name: edgeloop-sentinel
   path: ./apps/healthy-app/overlays/healthy
   targetNamespace: apps
+  serviceAccountName: deployer
