@@ -1,0 +1,13 @@
+id: dependency-outage
+description: backend-app is scaled to 0. web-app stays Running but never Ready. The fault is in backend-app, not web-app.
+inject: {app: backend-app, overlay: outage}
+observe:
+  app: web-app
+  symptom: {type: not_ready}
+recovery: {apps: [backend-app, web-app]}
+expected:
+  action: fix
+  diagnosis:
+    category: dependency_outage
+    target_app: backend-app
+    keywords: [backend-app]

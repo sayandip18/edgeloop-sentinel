@@ -1,0 +1,13 @@
+id: bad-image-tag
+description: web-app references image tag v999, which does not exist (no registry, imagePullPolicy Never).
+inject: {app: web-app, overlay: bad-image-tag}
+observe:
+  app: web-app
+  symptom: {type: container_reason, reasons: [ErrImageNeverPull, ImagePullBackOff, ErrImagePull, InvalidImageName]}
+recovery: {apps: [web-app]}
+expected:
+  action: fix
+  diagnosis:
+    category: bad_image
+    target_app: web-app
+    keywords: [v999]

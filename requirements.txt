@@ -5,3 +5,4 @@ openai==1.14.1
 kubernetes==29.0.0
 sqlalchemy==2.0.28
 pytest==8.1.0
+pyyaml==6.0.3

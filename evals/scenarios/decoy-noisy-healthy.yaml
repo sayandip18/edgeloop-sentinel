@@ -1,0 +1,13 @@
+id: decoy-noisy-healthy
+description: "healthy-app starts logging scary ERROR lines (transient upstream timeout) but stays Ready with no restarts. Nothing must be fixed."
+inject: {app: healthy-app, overlay: broken}
+observe:
+  app: healthy-app
+  symptom: {type: stays_healthy, window: 90}
+recovery: {apps: [healthy-app]}
+expected:
+  action: none
+  diagnosis:
+    category: none
+    target_app: healthy-app
+    keywords: []

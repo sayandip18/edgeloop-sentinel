@@ -1,0 +1,13 @@
+id: wrong-env-var
+description: web-app's BACKEND_URL points at a host that does not exist (backend-svc); the app exits 1 at startup.
+inject: {app: web-app, overlay: wrong-env-var}
+observe:
+  app: web-app
+  symptom: {type: restarts, min: 2}
+recovery: {apps: [web-app]}
+expected:
+  action: fix
+  diagnosis:
+    category: bad_env_var
+    target_app: web-app
+    keywords: [BACKEND_URL]

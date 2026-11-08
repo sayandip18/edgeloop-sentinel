@@ -1,0 +1,13 @@
+id: bad-config
+description: badconfig-app's ConfigMap has a non-numeric LISTEN_PORT; the app exits 2 on start.
+inject: {app: badconfig-app, overlay: broken}
+observe:
+  app: badconfig-app
+  symptom: {type: restarts, min: 2}
+recovery: {apps: [badconfig-app]}
+expected:
+  action: fix
+  diagnosis:
+    category: bad_config
+    target_app: badconfig-app
+    keywords: [LISTEN_PORT]

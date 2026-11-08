@@ -43,6 +43,8 @@ Phases 1 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md`
 
 ## Phase 2: Failure catalog and eval harness
 
+**Status: implemented, awaiting push and end-to-end run.** See [phase2.md](phase2.md).
+
 **Goal:** one command injects a failure and scores the outcome.
 
 **Scope**

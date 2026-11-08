@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-app
+  labels:
+    app: backend-app
+    app.kubernetes.io/part-of: edgeloop-sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend-app
+  template:
+    metadata:
+      labels:
+        app: backend-app
+    spec:
+      containers:
+        - name: backend-app
+          image: edgeloop/backend-app:v1
+          imagePullPolicy: Never
+          ports:
+            - {containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /, port: 8080}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-app
+  labels:
+    app: backend-app
+spec:
+  selector:
+    app: backend-app
+  ports:
+    - {port: 80, targetPort: 8080}

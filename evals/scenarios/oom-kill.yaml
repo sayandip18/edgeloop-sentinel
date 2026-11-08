@@ -1,0 +1,13 @@
+id: oom-kill
+description: oom-app allocates 300 MiB against a 128 MiB limit and is OOMKilled.
+inject: {app: oom-app, overlay: broken}
+observe:
+  app: oom-app
+  symptom: {type: container_reason, reasons: [OOMKilled]}
+recovery: {apps: [oom-app]}
+expected:
+  action: fix
+  diagnosis:
+    category: oom
+    target_app: oom-app
+    keywords: [memory]

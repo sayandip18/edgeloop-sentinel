@@ -70,3 +70,39 @@ spec:
   path: ./apps/healthy-app/overlays/healthy
   targetNamespace: apps
   serviceAccountName: deployer
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: backend-app
+  namespace: flux-system
+spec:
+  interval: 1m
+  retryInterval: 30s
+  timeout: 2m
+  prune: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: edgeloop-sentinel
+  path: ./apps/backend-app/overlays/healthy
+  targetNamespace: apps
+  serviceAccountName: deployer
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: web-app
+  namespace: flux-system
+spec:
+  interval: 1m
+  retryInterval: 30s
+  timeout: 2m
+  prune: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: edgeloop-sentinel
+  path: ./apps/web-app/overlays/healthy
+  targetNamespace: apps
+  serviceAccountName: deployer

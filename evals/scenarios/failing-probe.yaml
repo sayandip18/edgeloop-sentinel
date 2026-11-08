@@ -1,0 +1,13 @@
+id: failing-probe
+description: web-app's liveness probe checks /health (404) instead of /healthz, so the kubelet keeps restarting a healthy process.
+inject: {app: web-app, overlay: failing-probe}
+observe:
+  app: web-app
+  symptom: {type: restarts, min: 2}
+recovery: {apps: [web-app]}
+expected:
+  action: fix
+  diagnosis:
+    category: probe_failure
+    target_app: web-app
+    keywords: [liveness]

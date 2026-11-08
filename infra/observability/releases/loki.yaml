@@ -41,6 +41,11 @@ spec:
     singleBinary:
       replicas: 1
       persistence: {enabled: false}
+      # persistence off mounts nothing at /var/loki and the root FS is read-only
+      extraVolumes:
+        - {name: data, emptyDir: {}}
+      extraVolumeMounts:
+        - {name: data, mountPath: /var/loki}
       resources:
         requests: {cpu: 50m, memory: 192Mi}
         limits: {memory: 512Mi}
@@ -53,6 +58,8 @@ spec:
     lokiCanary: {enabled: false}
     test: {enabled: false}
     minio: {enabled: false}
+    sidecar:
+      rules: {enabled: false}
     monitoring:
       selfMonitoring: {enabled: false}
       serviceMonitor: {enabled: false}

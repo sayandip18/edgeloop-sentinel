@@ -10,3 +10,6 @@ kubeconfigs/
 __pycache__/
 .venv/
 *.pyc
+
+# eval run outputs
+evals/results/
