@@ -1,0 +1,12 @@
+.env
+# secrets and local credentials
+*.kubeconfig
+kubeconfigs/
+*.pem
+*.key
+.env.*
+
+# python
+__pycache__/
+.venv/
+*.pyc
