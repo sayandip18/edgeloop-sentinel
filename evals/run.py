@@ -3,12 +3,15 @@
 
     python evals/run.py list
     python evals/run.py validate
-    python evals/run.py run <id ...|all> [--yes] [--dry-run] [--responder CMD] [--out FILE]
+    python evals/run.py run <id ...|all> [--yes] [--dry-run] [--responder CMD] [--detector] [--out FILE]
     python evals/run.py summary <results.json>
 
 `run` injects each scenario THROUGH GIT (commits a broken overlay and pushes to origin/main, because Flux
 watches main), waits for the symptom, optionally lets a responder (the future agent) diagnose and fix, scores,
 then reverts through Git and waits for recovery. See docs/phase2.md.
+
+--detector (Phase 3): starts agent/watch.py (read-only diagnoser kubeconfig) before each injection and scores the
+incidents it opens: exactly one on the true target app per failure, none for the decoy.
 
 Responder protocol (optional): a shell command run from the repo root with env EVAL_SCENARIO_ID,
 EVAL_INJECT_APP, EVAL_OBSERVE_APP, EVAL_INJECT_SHA. It prints, as its LAST stdout line, JSON:
@@ -17,13 +20,15 @@ EVAL_INJECT_APP, EVAL_OBSERVE_APP, EVAL_INJECT_SHA. It prints, as its LAST stdou
 Without a responder only harness health is judged (symptom visible, revert recovers); fix and diagnosis
 metrics are reported as null, never as 0.
 """
-import argparse, datetime, json, os, shutil, subprocess, sys, time
+import argparse, atexit, datetime, json, os, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
-from scoring import aggregate, score_diagnosis, score_scenario  # noqa: E402
+from scoring import aggregate, score_detection, score_diagnosis, score_scenario  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agent"))
+from incidents import read_events, summarize  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 SCEN_DIR = ROOT / "evals" / "scenarios"
@@ -167,7 +172,35 @@ def run_responder(cmd, scn, sha, timeout):
         return {"action": "escalate", "diagnosis": None, "error": f"unparseable responder output (exit {r.returncode})"}
 
 
-def run_scenario(scn, responder, responder_timeout):
+DIAGNOSER_KUBECONFIG = ROOT / "kubeconfigs" / "diagnoser.kubeconfig"
+SETTLE_TIMEOUT = int(os.environ.get("SETTLE_TIMEOUT", "180"))
+
+
+def start_detector():
+    """Start the watcher; returns (process, log_path, errfile) once its baseline pass is done, or raises."""
+    log = Path(tempfile.mkdtemp(prefix="edgeloop-incidents-")) / "incidents.jsonl"
+    err = open(log.parent / "watch.err", "w+", encoding="utf-8")
+    proc = subprocess.Popen([sys.executable, str(ROOT / "agent" / "watch.py"), "--kubeconfig", str(DIAGNOSER_KUBECONFIG),
+                             "--interval", "3", "--log", str(log)], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=err)
+    atexit.register(lambda: proc.poll() is None and proc.kill())   # never leak the watcher if the runner dies
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        if any(e.get("event") == "watch_started" for e in read_events(log)): return proc, log, err
+        if proc.poll() is not None: break
+        time.sleep(1)
+    proc.kill(); err.seek(0)
+    raise RuntimeError("detector did not start: " + (err.read().strip() or "no output") +
+                       " (run: bash scripts/make-kubeconfig.sh diagnoser)")
+
+
+def stop_detector(proc, err):
+    proc.terminate()
+    try: proc.wait(10)
+    except subprocess.TimeoutExpired: proc.kill()
+    err.close()
+
+
+def run_scenario(scn, responder, responder_timeout, detector=False):
     rec = {"id": scn["id"], "expected_action": scn["expected"]["action"], "started": datetime.datetime.now().isoformat(timespec="seconds"),
            "detect_s": None, "notes": []}
     app, apps_to_check = scn["inject"]["app"], scn["recovery"]["apps"]
@@ -177,6 +210,7 @@ def run_scenario(scn, responder, responder_timeout):
         rec["aborted"] = True
         return rec
     base_restarts = sum(restarts(p) for p in pods(scn["observe"]["app"]))
+    det = start_detector() if detector else None
     healthy_file = overlay(app, "healthy")
     original = healthy_file.read_text(encoding="utf-8")
     shutil.copyfile(overlay(app, scn["inject"]["overlay"]), healthy_file)
@@ -237,6 +271,19 @@ def run_scenario(scn, responder, responder_timeout):
     except Exception as ex:
         run(["git", "revert", "--abort"], check=False)
         rec["notes"].append(f"REVERT FAILED, fix by hand: {ex}")
+    if det:
+        proc, log, err = det
+        # let the incident(s) resolve so anything the recovery itself triggers is also counted
+        wait_for(lambda: summarize(log, t_push - 1)[1] == 0, SETTLE_TIMEOUT)
+        stop_detector(proc, err)
+        incs, still_open = summarize(log, t_push - 1)
+        incs = sorted(incs, key=lambda i: i["opened_at"])
+        brief = [{"id": i["id"], "app": i["app"], "affected_apps": i["affected_apps"],
+                  "opened_after_inject_s": round(i["opened_at"] - t_push, 1), "state": i["state"],
+                  "signals": sorted({x["type"] for x in i["signals"]})} for i in incs]
+        rec["detection"] = score_detection(scn, brief, still_open)
+        rec["incidents"] = brief
+        print(f"  incidents: {len(brief)} (expected {rec['detection']['expected']}) -> {'ok' if rec['detection']['ok'] else 'WRONG'}", flush=True)
     rec["inject_sha"] = sha
     rec["diagnosis_expected"] = scn["expected"]["diagnosis"]
     diag = score_diagnosis(scn["expected"]["diagnosis"], (got or {}).get("diagnosis")) if responder else None
@@ -249,10 +296,10 @@ def fmt(v): return "-" if v is None else (f"{v}" if not isinstance(v, bool) else
 
 
 def print_summary(results, agg):
-    print(f"\n{'scenario':<22}{'symptom':<9}{'detect_s':<10}{'diagnosis':<10}{'action':<10}{'fixed':<7}{'false_fix':<10}{'revert_ok':<10}harness")
+    print(f"\n{'scenario':<22}{'symptom':<9}{'detect_s':<10}{'incidents':<10}{'diagnosis':<10}{'action':<10}{'fixed':<7}{'false_fix':<10}{'revert_ok':<10}harness")
     for r in results:
         s = r["score"]; d = s["diagnosis"]
-        print(f"{r['id']:<22}{fmt(s['symptom_observed']):<9}{fmt(r.get('detect_s')):<10}{fmt(None if d is None else d['correct']):<10}"
+        print(f"{r['id']:<22}{fmt(s['symptom_observed']):<9}{fmt(r.get('detect_s')):<10}{fmt(None if not r.get('detection') else r['detection']['count']):<10}{fmt(None if d is None else d['correct']):<10}"
               f"{fmt(s['action']):<10}{fmt(s['fixed']):<7}{fmt(s['false_fix']):<10}{fmt(s['revert_recovered']):<10}{'OK' if s['harness_ok'] else 'FAIL'}")
     print("\naggregate:", json.dumps(agg))
 
@@ -265,7 +312,7 @@ def cmd_run(args):
     ids = list(scns) if args.ids == ["all"] else args.ids
     unknown = [i for i in ids if i not in scns]
     if unknown: print(f"unknown scenario(s): {', '.join(unknown)}"); return 2
-    print(f"scenarios: {', '.join(ids)}\nresponder: {args.responder or 'none (harness check only)'}")
+    print(f"scenarios: {', '.join(ids)}\nresponder: {args.responder or 'none (harness check only)'}\ndetector: {'on' if args.detector else 'off'}")
     if args.dry_run:
         for i in ids:
             s = scns[i]
@@ -281,7 +328,7 @@ def cmd_run(args):
     for i in ids:
         print(f"\n== {i} ==", flush=True)
         try:
-            rec = run_scenario(scns[i], args.responder, args.responder_timeout)
+            rec = run_scenario(scns[i], args.responder, args.responder_timeout, args.detector)
         except Exception as ex:
             print(f"  ERROR: {ex}\n  Check `git log` / `git status`; a revert may be needed.")
             return 3
@@ -293,7 +340,8 @@ def cmd_run(args):
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"responder": args.responder, "results": results, "aggregate": agg}, indent=2), encoding="utf-8")
     print_summary(results, agg); print(f"\nresults: {out}")
-    return code or (0 if all(r["score"]["harness_ok"] for r in results) else 1)
+    ok = all(r["score"]["harness_ok"] for r in results) and all(r["detection"]["ok"] for r in results if r.get("detection"))
+    return code or (0 if ok else 1)
 
 
 def main():
@@ -302,7 +350,7 @@ def main():
     sub.add_parser("list"); sub.add_parser("validate")
     r = sub.add_parser("run")
     r.add_argument("ids", nargs="+"); r.add_argument("--yes", action="store_true"); r.add_argument("--dry-run", action="store_true")
-    r.add_argument("--responder"); r.add_argument("--responder-timeout", type=int, default=600); r.add_argument("--out")
+    r.add_argument("--responder"); r.add_argument("--detector", action="store_true"); r.add_argument("--responder-timeout", type=int, default=600); r.add_argument("--out")
     s = sub.add_parser("summary"); s.add_argument("file")
     a = p.parse_args()
     if a.cmd == "list":

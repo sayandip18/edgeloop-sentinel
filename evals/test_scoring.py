@@ -53,6 +53,24 @@ def test_fix_scoring_and_aggregate():
     assert empty["fix_rate"] is None and empty["false_fix_rate"] is None and empty["diagnosis_accuracy"] is None
 
 
+def test_detection_scoring():
+    from scoring import score_detection
+    fix = {"expected": {"action": "fix", "diagnosis": {"target_app": "backend-app"}}}
+    none = {"expected": {"action": "none", "diagnosis": {"target_app": "healthy-app"}}}
+    inc = lambda app, t=20.0: {"app": app, "opened_after_inject_s": t}
+    assert score_detection(fix, None) is None
+    assert score_detection(fix, [inc("backend-app")])["ok"]
+    assert not score_detection(fix, [])["ok"]                                    # missed
+    assert not score_detection(fix, [inc("backend-app"), inc("web-app")])["ok"]  # duplicate
+    assert not score_detection(fix, [inc("web-app")])["ok"]                      # wrong root
+    assert score_detection(none, [])["ok"] and not score_detection(none, [inc("healthy-app")])["ok"]
+    a = aggregate([{"expected_action": "fix", "detect_s": 5, "detection": score_detection(fix, [inc("backend-app", 30)]),
+                    "score": score_scenario(FIX, 5, None, None, False, None, None, True)},
+                   {"expected_action": "none", "detect_s": None, "detection": score_detection(none, [inc("healthy-app")]),
+                    "score": score_scenario(NONE, 90, None, None, False, None, None, True)}])
+    assert a["detection_rate"] == 0.5 and a["median_incident_s"] == 25
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

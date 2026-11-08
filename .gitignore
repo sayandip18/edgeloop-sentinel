@@ -13,3 +13,6 @@ __pycache__/
 
 # eval run outputs
 evals/results/
+
+# detector state
+agent/state/

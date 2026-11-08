@@ -2,7 +2,7 @@
 
 Detailed plan for each phase. The one-table summary lives in the [README](../README.md#roadmap). This file adds scope, deliverables, prerequisites and how each exit criterion is verified.
 
-Phases 1 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md` when work on it starts, so this file does not drift from what was built. Items marked *(decision needed)* are open.
+Phases 4 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md` when work on it starts, so this file does not drift from what was built. Items marked *(decision needed)* are open.
 
 ## Fixed constraints (apply to every phase)
 
@@ -62,6 +62,8 @@ Phases 1 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md`
 
 ## Phase 3: Detection and incident manager
 
+**Status: implemented, awaiting push and end-to-end run.** See [phase3.md](phase3.md).
+
 **Goal:** one incident per failure.
 
 **Scope**
@@ -70,6 +72,7 @@ Phases 1 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md`
 - Runs with the diagnoser identity only (read-only).
 
 **Exit criterion:** every Phase 2 scenario produces exactly one incident, and the decoy produces none.
+**Verified by:** `scripts/verify-phase3.sh [--git]`.
 
 ## Phase 4: Deterministic fast path
 

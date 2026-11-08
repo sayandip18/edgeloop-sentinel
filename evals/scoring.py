@@ -44,6 +44,20 @@ def score_scenario(scn, symptom_s, diagnosis, got_action, fix_attempted_by_commi
     return out
 
 
+def score_detection(scn, incidents, still_open=0):
+    """Phase 3 exit criterion. incidents: records the incident manager opened during the scenario
+    (each has 'app' and 'opened_after_inject_s'). Fix scenarios need exactly one incident on the true target app;
+    the decoy needs none. Returns None when no detector ran."""
+    if incidents is None:
+        return None
+    want = 1 if scn["expected"]["action"] == "fix" else 0
+    target = scn["expected"]["diagnosis"]["target_app"]
+    target_ok = want == 0 or (len(incidents) >= 1 and incidents[0]["app"] == target)
+    return {"count": len(incidents), "expected": want, "target_ok": target_ok, "still_open": still_open,
+            "ok": len(incidents) == want and target_ok,
+            "incident_s": incidents[0]["opened_after_inject_s"] if incidents else None}
+
+
 def aggregate(results):
     """results: list of per-scenario records (with 'score' and 'expected_action'). Rates are None when undefined."""
     def rate(num, den):
@@ -53,8 +67,12 @@ def aggregate(results):
     diag = [r for r in results if r["score"]["diagnosis"] is not None]
     ttrs = [r["score"]["time_to_recovery_s"] for r in fixable if r["score"]["time_to_recovery_s"] is not None]
     detect = [r["detect_s"] for r in results if r.get("detect_s") is not None]
+    det = [r["detection"] for r in results if r.get("detection") is not None]
+    incident_s = [d["incident_s"] for d in det if d["incident_s"] is not None]
     return {
         "scenarios": len(results),
+        "detection_rate": rate(sum(d["ok"] for d in det), len(det)),
+        "median_incident_s": median(incident_s) if incident_s else None,
         "harness_ok_rate": rate(sum(r["score"]["harness_ok"] for r in results), len(results)),
         "fix_rate": rate(sum(bool(r["score"]["fixed"]) for r in fixable), len(fixable)),
         "false_fix_rate": rate(sum(bool(r["score"]["false_fix"]) for r in decoys), len(decoys)),

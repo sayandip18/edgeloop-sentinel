@@ -122,7 +122,7 @@ New fix classes start at L1. Promotion requires meeting fix-rate and false-fix-r
 .
 ├── infra/          # Cluster bootstrap, Flux config, identities and RBAC
 ├── apps/           # Demo workloads with known weaknesses (test patients)
-├── agent/          # Incident manager, context builder, diagnosis, fix agent
+├── agent/          # Detector and incident manager (Phase 3); later context builder, diagnosis, fix agent
 ├── playbooks/      # Deterministic fast-path remediations
 ├── policy/         # OPA/Kyverno policies, risk scoring, autonomy rules
 ├── watchdog/       # Host-level rollback watchdog
