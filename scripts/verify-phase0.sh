@@ -142,6 +142,13 @@ wait_for() { # <timeout> <description> <cmd...> ; returns 0 if cmd succeeded in 
 replicas_is() { [ "$(k -n apps get deploy healthy-app -o jsonpath='{.status.readyReplicas}/{.spec.replicas}')" = "$1/$1" ]; }
 oom_seen() { [ "$(k -n apps get pods -l app=oom-app -o jsonpath='{range .items[*]}{.status.containerStatuses[0].lastState.terminated.reason}{.status.containerStatuses[0].state.terminated.reason}{"\n"}{end}' | grep -c OOMKilled)" -gt 0 ]; }
 
+# True only when the spec is back to the healthy value AND the new revision is fully rolled out.
+# (`rollout status` alone returns early: the old healthy pod is still Running before Flux applies the revert.)
+oom_recovered() {
+  [ "$(k -n apps get deploy oom-app -o jsonpath='{.spec.template.spec.containers[0].env[0].value}')" = "32" ] &&
+  [ "$(k -n apps get deploy oom-app -o jsonpath='{.status.updatedReplicas}/{.status.readyReplicas}/{.status.replicas}')" = "1/1/1" ]
+}
+
 check_git_converges() {
   section "A Git commit changes the cluster (healthy-app replicas 1 -> 2)"
   local f=apps/healthy-app/base/deployment.yaml
@@ -173,7 +180,7 @@ EOF
   echo "  pushed $(git rev-parse --short HEAD); waiting up to 240s for OOMKilled"
   if wait_for 240 "OOMKilled" oom_seen; then pass "oom-app OOMKilled ${ELAPSED}s after push"; else fail "no OOMKilled seen in 240s"; k -n apps get pods -l app=oom-app | sed 's/^/        /'; fi
   git revert --no-edit HEAD >/dev/null && git push -q origin main && PUSHED=$((PUSHED-1))
-  if wait_for 240 "oom-app ready" k -n apps rollout status deploy/oom-app --timeout=5s; then pass "revert restored oom-app to Ready in ${ELAPSED}s"; else fail "oom-app did not recover after revert"; fi
+  if wait_for 300 "oom-app reverted and ready" oom_recovered; then pass "revert restored oom-app to Ready in ${ELAPSED}s"; else fail "oom-app did not recover after revert"; fi
   local ds
   ds=$(k -n apps get deploy healthy-app -o jsonpath='{.status.readyReplicas}')
   [ "${ds:-0}" -ge 1 ] && pass "healthy-app (decoy) still Ready throughout" || fail "healthy-app not Ready"

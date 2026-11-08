@@ -74,7 +74,11 @@ Cluster-only checks (run 2026-11-08): **50 passed, 0 failed.**
 - RBAC for diagnoser and fixer behaves as the matrix in [identities.md](identities.md) states.
 - Drift correction works with Flux defaults (no configuration change needed): a manual scale and image change on `healthy-app` were reverted 43s after the edit, within the 1m interval.
 
-Git-driven checks: **not yet run.** Record the result here after `--git` is run.
+Full run with `--git` (2026-11-08): **55 passed, 0 failed.**
+
+- A pushed Git change (healthy-app replicas 1 to 2) converged 65s after the push with no forced reconcile; its revert converged in 54s.
+- A pushed broken patch produced OOMKilled in oom-app 74s after the push, and the decoy `healthy-app` stayed Ready.
+- Caveat: that run's "revert restored oom-app" check was a false pass (`rollout status` returned before Flux applied the revert). The check was fixed to require the healthy spec value and a completed rollout, and oom-app's recovery was confirmed by hand. The fixed check has not been re-run in a full `--git` pass.
 
 ## Out of scope for Phase 0
 
