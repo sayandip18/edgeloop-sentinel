@@ -1,0 +1,44 @@
+# Three Flux Kustomizations for the observability stack, ordered:
+#   observability-rbac  ->  observability  ->  observability-rules
+# rbac is applied with Flux's own identity (an identity must not grant itself permissions); the rest run as obs-deployer.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: observability-rbac
+  namespace: flux-system
+spec:
+  interval: 5m
+  retryInterval: 30s
+  prune: true
+  sourceRef: {kind: GitRepository, name: edgeloop-sentinel}
+  path: ./infra/observability/rbac
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: observability
+  namespace: flux-system
+spec:
+  interval: 5m
+  retryInterval: 30s
+  timeout: 15m
+  prune: true
+  wait: true
+  dependsOn: [{name: observability-rbac}]
+  sourceRef: {kind: GitRepository, name: edgeloop-sentinel}
+  path: ./infra/observability
+  serviceAccountName: obs-deployer
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: observability-rules
+  namespace: flux-system
+spec:
+  interval: 5m
+  retryInterval: 30s
+  prune: true
+  dependsOn: [{name: observability}]
+  sourceRef: {kind: GitRepository, name: edgeloop-sentinel}
+  path: ./infra/observability/rules
+  serviceAccountName: obs-deployer

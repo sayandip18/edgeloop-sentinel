@@ -1,0 +1,59 @@
+# Single-binary Loki, filesystem storage on emptyDir (lab only: logs are lost on pod restart).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: flux-system
+spec:
+  interval: 10m
+  releaseName: loki
+  targetNamespace: observability
+  storageNamespace: observability
+  serviceAccountName: obs-deployer
+  timeout: 10m
+  chart:
+    spec:
+      chart: loki
+      version: 7.5.0
+      sourceRef: {kind: HelmRepository, name: grafana, namespace: flux-system}
+  install: {remediation: {retries: 3}}
+  upgrade: {remediation: {retries: 3}}
+  values:
+    deploymentMode: SingleBinary
+    loki:
+      auth_enabled: false
+      commonConfig: {replication_factor: 1}
+      storage: {type: filesystem}
+      schemaConfig:
+        configs:
+          - from: "2024-04-01"
+            store: tsdb
+            object_store: filesystem
+            schema: v13
+            index: {prefix: index_, period: 24h}
+      limits_config:
+        retention_period: 24h
+        volume_enabled: true
+      compactor:
+        retention_enabled: true
+        delete_request_store: filesystem
+      pattern_ingester: {enabled: false}
+    singleBinary:
+      replicas: 1
+      persistence: {enabled: false}
+      resources:
+        requests: {cpu: 50m, memory: 192Mi}
+        limits: {memory: 512Mi}
+    read: {replicas: 0}
+    write: {replicas: 0}
+    backend: {replicas: 0}
+    gateway: {enabled: false}
+    chunksCache: {enabled: false}
+    resultsCache: {enabled: false}
+    lokiCanary: {enabled: false}
+    test: {enabled: false}
+    minio: {enabled: false}
+    monitoring:
+      selfMonitoring: {enabled: false}
+      serviceMonitor: {enabled: false}
+      lokiCanary: {enabled: false}

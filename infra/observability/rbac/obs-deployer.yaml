@@ -1,0 +1,117 @@
+# Identity for deploying the observability stack. Separate from `deployer`, which stays scoped to `apps`.
+# Used by (a) the `observability` Flux Kustomization and (b) the HelmReleases (spec.serviceAccountName).
+# Both live in flux-system, so the ServiceAccount does too (see docs/identities.md, impersonation gotcha).
+#
+# Charts need CRDs, ClusterRoles and cluster-wide objects, so this is broader than `deployer`. It is bounded by:
+#  - no access to Secrets outside `observability` and flux-system (Helm release storage), no `apps` write access
+#  - no node/pod exec, no impersonate
+# NOTE: RBAC objects are created with escalate/bind because the charts create ClusterRoles. That makes this identity
+# effectively privileged: changes to this file must be reviewed like a cluster-admin grant.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: obs-deployer
+  namespace: flux-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edgeloop-obs-deployer-cluster
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: [customresourcedefinitions]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [clusterroles, clusterrolebindings]
+    verbs: [get, list, watch, create, update, patch, delete, escalate, bind]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: [validatingwebhookconfigurations, mutatingwebhookconfigurations]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edgeloop-obs-deployer-cluster
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: edgeloop-obs-deployer-cluster}
+subjects:
+  - {kind: ServiceAccount, name: obs-deployer, namespace: flux-system}
+---
+# Everything the charts create inside `observability`, plus Helm's release Secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: edgeloop-obs-deployer
+  namespace: observability
+rules:
+  - apiGroups: [""]
+    resources: [configmaps, secrets, services, serviceaccounts, persistentvolumeclaims, endpoints, pods]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["apps"]
+    resources: [deployments, statefulsets, daemonsets, replicasets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [roles, rolebindings]
+    verbs: [get, list, watch, create, update, patch, delete, escalate, bind]
+  - apiGroups: ["batch"]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies, ingresses]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["policy"]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: edgeloop-obs-deployer
+  namespace: observability
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: edgeloop-obs-deployer}
+subjects:
+  - {kind: ServiceAccount, name: obs-deployer, namespace: flux-system}
+---
+# The Kustomization applies HelmRepository/HelmRelease objects in flux-system; the HelmRelease
+# also needs to read its own source and write status.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: edgeloop-obs-deployer
+  namespace: flux-system
+rules:
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: [helmrepositories, helmcharts]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: [helmreleases]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: [helmcharts, helmrepositories]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: edgeloop-obs-deployer
+  namespace: flux-system
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: edgeloop-obs-deployer}
+subjects:
+  - {kind: ServiceAccount, name: obs-deployer, namespace: flux-system}
+---
+# The stack's ServiceMonitors/PrometheusRules/scrape targets read kubelet and pods cluster-wide via the
+# chart's own ClusterRoles. kube-system access for the kubelet Service is created by the chart in kube-system.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: edgeloop-obs-deployer
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources: [services, endpoints, configmaps]
+    verbs: [get, list, watch, create, update, patch, delete]

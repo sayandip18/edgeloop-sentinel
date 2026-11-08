@@ -1,0 +1,28 @@
+# Small, explicit alert rules for the demo failures (the full default rule set is disabled to save memory).
+# Prometheus only records state; nothing routes these anywhere until Phase 3.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: edgeloop-apps
+  namespace: observability
+spec:
+  groups:
+    - name: edgeloop.apps
+      rules:
+        - alert: AppContainerOOMKilled
+          expr: kube_pod_container_status_last_terminated_reason{namespace="apps",reason="OOMKilled"} == 1
+          labels: {severity: warning}
+          annotations: {summary: "{{ $labels.pod }} was OOMKilled"}
+        - alert: AppContainerRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="apps"}[10m]) > 0
+          labels: {severity: warning}
+          annotations: {summary: "{{ $labels.pod }} restarted"}
+        - alert: AppCrashLoopBackOff
+          expr: kube_pod_container_status_waiting_reason{namespace="apps",reason="CrashLoopBackOff"} == 1
+          labels: {severity: critical}
+          annotations: {summary: "{{ $labels.pod }} is in CrashLoopBackOff"}
+        - alert: AppPodNotReady
+          expr: kube_pod_status_ready{namespace="apps",condition="false"} == 1
+          for: 2m
+          labels: {severity: warning}
+          annotations: {summary: "{{ $labels.pod }} not Ready"}

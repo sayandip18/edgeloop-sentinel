@@ -1,0 +1,9 @@
+# Entry point for the `observability` Flux Kustomization. rbac/ and rules/ are applied by their own
+# Flux Kustomizations (see ../flux/observability.yaml), so they are deliberately not listed here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - sources/helmrepositories.yaml
+  - releases/kube-prometheus-stack.yaml
+  - releases/loki.yaml
+  - releases/alloy.yaml

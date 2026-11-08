@@ -7,6 +7,7 @@ Principle 4: separate roles, separate identities. Each identity can do exactly o
 | `diagnoser` | ServiceAccount in `observability` | Short-lived token via `scripts/make-kubeconfig.sh diagnoser` | get/list/watch pods, pods/log, events, configmaps, deployments, replicasets **in `apps` only** | any write, secrets, exec, anything outside `apps`, nodes |
 | `fixer` | ServiceAccount in `observability` with **no bindings** | Off-cluster Git credential (see below) | Push a branch and open a PR in this repo | Anything in Kubernetes (denied everything) |
 | `deployer` | ServiceAccount in `flux-system` | None issued; Flux impersonates it | create/update/patch/delete configmaps, services, deployments, replicasets **in `apps` only** | Anything else, including RBAC, secrets, other namespaces |
+| `obs-deployer` | ServiceAccount in `flux-system` | None issued; Flux impersonates it | Install the observability stack: CRDs, ClusterRoles, workloads in `observability` (Phase 1) | Write to `apps`, read secrets outside `observability`, exec. Effectively privileged because charts create ClusterRoles: review changes like a cluster-admin grant |
 
 Definitions: [infra/rbac/](../infra/rbac/). Verified by `scripts/verify-phase0.sh`.
 

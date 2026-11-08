@@ -1,0 +1,61 @@
+# Lean profile for Docker Desktop: Prometheus + operator + kube-state-metrics.
+# No Grafana, Alertmanager, node-exporter, admission webhooks or control-plane scrapes.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: flux-system
+spec:
+  interval: 10m
+  releaseName: kube-prometheus-stack
+  targetNamespace: observability
+  storageNamespace: observability
+  serviceAccountName: obs-deployer
+  timeout: 10m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: 93.1.0
+      sourceRef: {kind: HelmRepository, name: prometheus-community, namespace: flux-system}
+  install:
+    crds: CreateReplace
+    remediation: {retries: 3}
+  upgrade:
+    crds: CreateReplace
+    remediation: {retries: 3}
+  values:
+    fullnameOverride: kps
+    defaultRules: {create: false}
+    grafana: {enabled: false}
+    alertmanager: {enabled: false}
+    nodeExporter: {enabled: false}
+    kubeControllerManager: {enabled: false}
+    kubeScheduler: {enabled: false}
+    kubeEtcd: {enabled: false}
+    kubeProxy: {enabled: false}
+    kubeApiServer: {enabled: false}
+    coreDns: {enabled: false}
+    kubelet: {enabled: true}
+    prometheusOperator:
+      admissionWebhooks: {enabled: false}
+      tls: {enabled: false}
+      resources:
+        requests: {cpu: 20m, memory: 64Mi}
+        limits: {memory: 128Mi}
+    kube-state-metrics:
+      resources:
+        requests: {cpu: 10m, memory: 32Mi}
+        limits: {memory: 96Mi}
+    prometheus:
+      prometheusSpec:
+        retention: 24h
+        scrapeInterval: 30s
+        evaluationInterval: 30s
+        ruleSelectorNilUsesHelmValues: false
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        probeSelectorNilUsesHelmValues: false
+        resources:
+          requests: {cpu: 100m, memory: 400Mi}
+          limits: {memory: 800Mi}
+        storageSpec: {}
