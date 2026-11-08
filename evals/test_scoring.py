@@ -71,6 +71,25 @@ def test_detection_scoring():
     assert a["detection_rate"] == 0.5 and a["median_incident_s"] == 25
 
 
+def test_fastpath_scoring():
+    from scoring import score_fastpath
+    fix = {"expected": {"action": "fix", "diagnosis": {"target_app": "backend-app"}}}
+    none = {"expected": {"action": "none", "diagnosis": {"target_app": "healthy-app"}}}
+    pr = lambda app, ts=130.0: {"event": "pr_opened", "app": app, "playbook": "revert-recent-change", "ts": ts}
+    assert score_fastpath(fix, None, 100) is None
+    ok = score_fastpath(fix, [pr("backend-app")], 100)
+    assert ok["ok"] and ok["time_to_pr_s"] == 30.0 and ok["playbook"] == "revert-recent-change"
+    assert not score_fastpath(fix, [], 100)["ok"]                                   # no PR
+    assert not score_fastpath(fix, [pr("backend-app"), pr("backend-app")], 100)["ok"]   # duplicate PRs
+    assert not score_fastpath(fix, [pr("web-app")], 100)["ok"]                      # PR on the wrong app
+    assert score_fastpath(none, [], 100)["ok"] and not score_fastpath(none, [pr("healthy-app")], 100)["ok"]   # decoy: a PR is a false fix
+    a = aggregate([{"expected_action": "fix", "detect_s": 5, "fastpath": score_fastpath(fix, [pr("backend-app", 140)], 100),
+                    "score": score_scenario(FIX, 5, None, None, False, None, None, True)},
+                   {"expected_action": "none", "detect_s": None, "fastpath": score_fastpath(none, [], 100),
+                    "score": score_scenario(NONE, 90, None, None, False, None, None, True)}])
+    assert a["fastpath_rate"] == 1.0 and a["median_time_to_pr_s"] == 40.0
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

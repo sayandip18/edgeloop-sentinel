@@ -76,6 +76,8 @@ Phases 4 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md`
 
 ## Phase 4: Deterministic fast path
 
+**Status: implemented, awaiting branch protection, a fixer token and the end-to-end run.** See [phase4.md](phase4.md).
+
 **Goal:** known failures self-heal through a pull request, with no LLM.
 
 **Scope**
@@ -84,6 +86,7 @@ Phases 4 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md`
 - Autonomy L1: a human approves the PR. **Branch protection on `main` must be enabled before this phase**, so the PAT cannot push directly.
 
 **Exit criterion:** known failures self-heal via PR. The README notes that this phase already delivers real value at low risk.
+**Verified by:** `scripts/verify-phase4.sh [--git]`.
 
 ## Phase 5: Safety rails
 
@@ -152,8 +155,8 @@ Code patches (always human-reviewed first), a small local model for offline tria
 | --- | --- |
 | How the diagnoser reaches Prometheus/Loki without write access | Phase 1 |
 | Docker Desktop memory vs full kube-prometheus-stack | Phase 1 |
-| Whether playbooks use the fixer identity and PAT | Phase 4 |
-| Branch protection on `main` (required) | Before Phase 4 |
+| ~~Whether playbooks use the fixer identity and PAT~~ decided: yes, a fine-grained PAT (phase4.md) | Phase 4 |
+| Branch protection on `main` (required): **owner action still pending** | Before Phase 4 |
 | Sandbox technology (vcluster vs kind with gVisor) | Phase 5 |
 | LLM provider, model and budget | Phase 6 |
 | Escalation channel | Phase 8 |

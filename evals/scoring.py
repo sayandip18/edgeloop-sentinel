@@ -58,6 +58,22 @@ def score_detection(scn, incidents, still_open=0):
             "incident_s": incidents[0]["opened_after_inject_s"] if incidents else None}
 
 
+def score_fastpath(scn, events, t_inject):
+    """Phase 4 exit criterion. events: the fast path's state events during the scenario ('pr_opened' / 'pr_merged' ...,
+    each with 'ts', 'app'). A fix scenario needs exactly one PR, on the true target app; the decoy needs none.
+    Returns None when the fast path did not run."""
+    if events is None:
+        return None
+    prs = [e for e in events if e["event"] == "pr_opened"]
+    want = 1 if scn["expected"]["action"] == "fix" else 0
+    target = scn["expected"]["diagnosis"]["target_app"]
+    target_ok = want == 0 or (len(prs) >= 1 and prs[0]["app"] == target)
+    return {"prs": len(prs), "expected": want, "target_ok": target_ok, "ok": len(prs) == want and target_ok,
+            "playbook": prs[0]["playbook"] if prs else None,
+            "declined": [e.get("reason") for e in events if e["event"] == "declined"],
+            "time_to_pr_s": round(prs[0]["ts"] - t_inject, 1) if prs else None}
+
+
 def aggregate(results):
     """results: list of per-scenario records (with 'score' and 'expected_action'). Rates are None when undefined."""
     def rate(num, den):
@@ -69,10 +85,14 @@ def aggregate(results):
     detect = [r["detect_s"] for r in results if r.get("detect_s") is not None]
     det = [r["detection"] for r in results if r.get("detection") is not None]
     incident_s = [d["incident_s"] for d in det if d["incident_s"] is not None]
+    fp = [r["fastpath"] for r in results if r.get("fastpath") is not None]
+    pr_s = [f["time_to_pr_s"] for f in fp if f["time_to_pr_s"] is not None]
     return {
         "scenarios": len(results),
         "detection_rate": rate(sum(d["ok"] for d in det), len(det)),
         "median_incident_s": median(incident_s) if incident_s else None,
+        "fastpath_rate": rate(sum(f["ok"] for f in fp), len(fp)),
+        "median_time_to_pr_s": median(pr_s) if pr_s else None,
         "harness_ok_rate": rate(sum(r["score"]["harness_ok"] for r in results), len(results)),
         "fix_rate": rate(sum(bool(r["score"]["fixed"]) for r in fixable), len(fixable)),
         "false_fix_rate": rate(sum(bool(r["score"]["false_fix"]) for r in decoys), len(decoys)),

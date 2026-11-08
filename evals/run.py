@@ -3,7 +3,7 @@
 
     python evals/run.py list
     python evals/run.py validate
-    python evals/run.py run <id ...|all> [--yes] [--dry-run] [--responder CMD] [--detector] [--out FILE]
+    python evals/run.py run <id ...|all> [--yes] [--dry-run] [--responder CMD] [--detector] [--fastpath [--approve auto|manual]] [--out FILE]
     python evals/run.py summary <results.json>
 
 `run` injects each scenario THROUGH GIT (commits a broken overlay and pushes to origin/main, because Flux
@@ -12,6 +12,12 @@ then reverts through Git and waits for recovery. See docs/phase2.md.
 
 --detector (Phase 3): starts agent/watch.py (read-only diagnoser kubeconfig) before each injection and scores the
 incidents it opens: exactly one on the true target app per failure, none for the decoy.
+
+--fastpath (Phase 4, implies --detector): also runs agent/fastpath.py against the detector's incidents. It opens a PR
+with the fixer PAT (env FIXER_GITHUB_TOKEN). The runner then plays the human approver: --approve auto (default)
+fast-forwards main to the PR branch and pushes it with YOUR git credentials (the PR then shows as merged); --approve
+manual waits up to APPROVE_TIMEOUT for you to merge it on GitHub. Scored: exactly one PR on the true target app per
+failure and none for the decoy, plus whether the cluster recovered because of the merged PR.
 
 Responder protocol (optional): a shell command run from the repo root with env EVAL_SCENARIO_ID,
 EVAL_INJECT_APP, EVAL_OBSERVE_APP, EVAL_INJECT_SHA. It prints, as its LAST stdout line, JSON:
@@ -26,7 +32,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
-from scoring import aggregate, score_detection, score_diagnosis, score_scenario  # noqa: E402
+from scoring import aggregate, score_detection, score_diagnosis, score_fastpath, score_scenario  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agent"))
 from incidents import read_events, summarize  # noqa: E402
 
@@ -174,6 +180,8 @@ def run_responder(cmd, scn, sha, timeout):
 
 DIAGNOSER_KUBECONFIG = ROOT / "kubeconfigs" / "diagnoser.kubeconfig"
 SETTLE_TIMEOUT = int(os.environ.get("SETTLE_TIMEOUT", "180"))
+PR_TIMEOUT = int(os.environ.get("PR_TIMEOUT", "240"))            # incident -> settle -> PR
+APPROVE_TIMEOUT = int(os.environ.get("APPROVE_TIMEOUT", "900"))  # --approve manual: how long a human gets
 
 
 def start_detector():
@@ -200,7 +208,43 @@ def stop_detector(proc, err):
     err.close()
 
 
-def run_scenario(scn, responder, responder_timeout, detector=False):
+def start_fastpath(incident_log):
+    """Start the fast path on the detector's incident log (own temp state). Returns (process, state_path, errfile)."""
+    state = incident_log.parent / "fastpath.jsonl"
+    err = open(incident_log.parent / "fastpath.err", "w+", encoding="utf-8")
+    proc = subprocess.Popen([sys.executable, str(ROOT / "agent" / "fastpath.py"), "run", "--incidents", str(incident_log),
+                             "--state", str(state), "--interval", "3", "--settle", "20"],
+                            cwd=ROOT, stdout=subprocess.DEVNULL, stderr=err)
+    atexit.register(lambda: proc.poll() is None and proc.kill())
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        if any(e.get("event") == "started" for e in read_events(state)): return proc, state, err
+        if proc.poll() is not None: break
+        time.sleep(1)
+    proc.kill(); err.seek(0)
+    raise RuntimeError("fast path did not start: " + (err.read().strip() or "no output"))
+
+
+def stop_fastpath(fp):
+    proc, _, err = fp
+    proc.terminate()
+    try: proc.wait(10)
+    except subprocess.TimeoutExpired: proc.kill()
+    err.close()
+
+
+def approve_pr(pr, fstate, mode):
+    """Plays the human reviewer. Returns True once the PR's change is on origin/main."""
+    if mode == "manual":
+        print(f"  waiting up to {APPROVE_TIMEOUT}s for you to review and merge {pr['url']}", flush=True)
+        return wait_for(lambda: any(e["event"] == "pr_merged" for e in read_events(fstate)), APPROVE_TIMEOUT) is not None
+    run(["git", "fetch", "-q", "origin", pr["branch"]])
+    run(["git", "merge", "--ff-only", "FETCH_HEAD"])     # fails loudly if main moved: never silently merges something else
+    run(["git", "push", "-q", "origin", "main"])
+    return True
+
+
+def run_scenario(scn, responder, responder_timeout, detector=False, fastpath=False, approve="auto"):
     rec = {"id": scn["id"], "expected_action": scn["expected"]["action"], "started": datetime.datetime.now().isoformat(timespec="seconds"),
            "detect_s": None, "notes": []}
     app, apps_to_check = scn["inject"]["app"], scn["recovery"]["apps"]
@@ -210,7 +254,13 @@ def run_scenario(scn, responder, responder_timeout, detector=False):
         rec["aborted"] = True
         return rec
     base_restarts = sum(restarts(p) for p in pods(scn["observe"]["app"]))
-    det = start_detector() if detector else None
+    det = start_detector() if (detector or fastpath) else None
+    fp = None
+    if fastpath:
+        try:
+            fp = start_fastpath(det[1])
+        except Exception:
+            stop_detector(det[0], det[2]); raise
     healthy_file = overlay(app, "healthy")
     original = healthy_file.read_text(encoding="utf-8")
     shutil.copyfile(overlay(app, scn["inject"]["overlay"]), healthy_file)
@@ -251,6 +301,28 @@ def run_scenario(scn, responder, responder_timeout, detector=False):
             ttr_wait = wait_for(lambda: all_healthy(apps_to_check), RECOVERY_TIMEOUT)
             recovered_by_fix = ttr_wait is not None
             ttr = round(time.time() - t_push, 1) if recovered_by_fix else None
+    elif fp:
+        fstate = fp[1]
+        if scn["expected"]["action"] == "fix":
+            wait_for(lambda: any(e["event"] in ("pr_opened", "declined") for e in read_events(fstate)), PR_TIMEOUT)
+        pr = next((e for e in read_events(fstate) if e["event"] == "pr_opened"), None)
+        got_action = "none"
+        if pr:
+            got_action = "fix"
+            print(f"  fast path opened PR #{pr['pr']} ({pr['playbook']}): {pr['url']}", flush=True)
+            try:
+                merged = approve_pr(pr, fstate, approve)
+            except Exception as ex:
+                merged = False; rec["notes"].append(f"approval failed: {ex}")
+            if merged:
+                ttr_wait = wait_for(lambda: all_healthy(apps_to_check), RECOVERY_TIMEOUT)
+                recovered_by_fix = ttr_wait is not None
+                ttr = round(time.time() - t_push, 1) if recovered_by_fix else None
+            else:
+                recovered_by_fix = False
+        elif scn["expected"]["action"] == "fix":
+            got_action = "escalate"
+        rec["responder"] = {"action": got_action, "via": "fastpath"}
     run(["git", "fetch", "-q", "origin", "main"])
     others = int(run(["git", "rev-list", "--count", f"{sha}..origin/main"]).stdout.strip())
     fix_commits = others > 0
@@ -271,6 +343,14 @@ def run_scenario(scn, responder, responder_timeout, detector=False):
     except Exception as ex:
         run(["git", "revert", "--abort"], check=False)
         rec["notes"].append(f"REVERT FAILED, fix by hand: {ex}")
+    if fp:
+        if any(e["event"] == "pr_opened" for e in read_events(fp[1])):   # let it record the merge and tidy its branch
+            wait_for(lambda: any(e["event"] in ("pr_merged", "pr_closed") for e in read_events(fp[1])), 40)
+        stop_fastpath(fp)
+        evs = [e for e in read_events(fp[1]) if e.get("ts", 0) >= t_push - 1]
+        rec["fastpath"] = score_fastpath(scn, evs, t_push)
+        print(f"  fast path: {rec['fastpath']['prs']} PR(s) (expected {rec['fastpath']['expected']}) -> "
+              f"{'ok' if rec['fastpath']['ok'] else 'WRONG'}", flush=True)
     if det:
         proc, log, err = det
         # let the incident(s) resolve so anything the recovery itself triggers is also counted
@@ -310,9 +390,10 @@ def cmd_run(args):
     if errs:
         print("scenario validation failed:\n  " + "\n  ".join(errs)); return 2
     ids = list(scns) if args.ids == ["all"] else args.ids
+    if args.fastpath: args.detector = True
     unknown = [i for i in ids if i not in scns]
     if unknown: print(f"unknown scenario(s): {', '.join(unknown)}"); return 2
-    print(f"scenarios: {', '.join(ids)}\nresponder: {args.responder or 'none (harness check only)'}\ndetector: {'on' if args.detector else 'off'}")
+    print(f"scenarios: {', '.join(ids)}\nresponder: {args.responder or 'none (harness check only)'}\ndetector: {'on' if args.detector else 'off'}\nfast path: {('on, approve=' + args.approve) if args.fastpath else 'off'}")
     if args.dry_run:
         for i in ids:
             s = scns[i]
@@ -321,14 +402,18 @@ def cmd_run(args):
         print("dry run: no Git or cluster changes made"); return 0
     err = precheck()
     if err: print(f"precheck failed: {err}"); return 2
+    if args.fastpath:
+        if args.responder: print("--fastpath and --responder are mutually exclusive"); return 2
+        if not os.environ.get("FIXER_GITHUB_TOKEN"): print("--fastpath needs FIXER_GITHUB_TOKEN (see docs/phase4.md)"); return 2
     if not args.yes:
         print(f"\nThis makes {2 * len(ids)} commits (inject + revert per scenario) and PUSHES them to origin/main (public).")
+        if args.fastpath: print("The fast path also opens PRs on GitHub; with --approve auto this runner merges them by pushing to main.")
         if input("Proceed? [y/N] ").strip().lower() != "y": print("aborted"); return 1
     results = []; code = 0
     for i in ids:
         print(f"\n== {i} ==", flush=True)
         try:
-            rec = run_scenario(scns[i], args.responder, args.responder_timeout, args.detector)
+            rec = run_scenario(scns[i], args.responder, args.responder_timeout, args.detector, args.fastpath, args.approve)
         except Exception as ex:
             print(f"  ERROR: {ex}\n  Check `git log` / `git status`; a revert may be needed.")
             return 3
@@ -340,7 +425,8 @@ def cmd_run(args):
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"responder": args.responder, "results": results, "aggregate": agg}, indent=2), encoding="utf-8")
     print_summary(results, agg); print(f"\nresults: {out}")
-    ok = all(r["score"]["harness_ok"] for r in results) and all(r["detection"]["ok"] for r in results if r.get("detection"))
+    ok = (all(r["score"]["harness_ok"] for r in results) and all(r["detection"]["ok"] for r in results if r.get("detection"))
+          and all(r["fastpath"]["ok"] and (r["expected_action"] == "none" or r["score"]["fixed"]) for r in results if r.get("fastpath")))
     return code or (0 if ok else 1)
 
 
@@ -350,7 +436,7 @@ def main():
     sub.add_parser("list"); sub.add_parser("validate")
     r = sub.add_parser("run")
     r.add_argument("ids", nargs="+"); r.add_argument("--yes", action="store_true"); r.add_argument("--dry-run", action="store_true")
-    r.add_argument("--responder"); r.add_argument("--detector", action="store_true"); r.add_argument("--responder-timeout", type=int, default=600); r.add_argument("--out")
+    r.add_argument("--responder"); r.add_argument("--detector", action="store_true"); r.add_argument("--fastpath", action="store_true"); r.add_argument("--approve", choices=["auto", "manual"], default="auto"); r.add_argument("--responder-timeout", type=int, default=600); r.add_argument("--out")
     s = sub.add_parser("summary"); s.add_argument("file")
     a = p.parse_args()
     if a.cmd == "list":

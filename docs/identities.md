@@ -24,7 +24,7 @@ Definitions: [infra/rbac/](../infra/rbac/). Verified by `scripts/verify-phase0.s
 
 The last row is Kubernetes' default `system:basic-user` / `system:discovery` access for any authenticated user. It exposes no cluster data, so the verifier allows it and rejects anything else for the fixer.
 
-## Fixer's Git credential (Phase 7, not created yet)
+## Fixer's Git credential (used from Phase 4; not created yet)
 
 Decision: a **fine-grained personal access token** scoped to this one repository, with:
 
@@ -40,7 +40,7 @@ Handling rules for when it is created:
 
 - Store it outside the repo (env var or secret store). `.gitignore` already covers `.env`, `*.pem`, `*.key`.
 - Never mount it into the cluster or give it to the diagnoser process.
-- Because there is no branch protection on `main` yet, the PAT *could* push to `main` directly. Add branch protection (require PR) before Phase 7, so "fixer proposes, human or policy engine approves" is enforced by GitHub and not by convention.
+- Without branch protection on `main` the PAT *could* push to `main` directly. Protection is required from Phase 4 on, so "fixer proposes, human approves" is enforced by GitHub and not by convention. `agent/fastpath.py` refuses to start unless GitHub reports `main` as protected and the token's account is not a repo admin. Setup steps: [phase4.md](phase4.md#one-time-setup-owner-actions).
 
 ## Gotchas
 
