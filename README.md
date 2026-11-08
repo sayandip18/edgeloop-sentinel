@@ -1,8 +1,8 @@
-# Edge Healer
+# edgeloop-sentinel
 
 An autonomous self-healing agent for containerized edge services on Kubernetes. It detects runtime failures, diagnoses them from logs and cluster state, proposes patches to code or manifests, validates them in an isolated sandbox with independent machine checks, and then either rolls them out safely or escalates to a human.
 
-> **Status:** early development. See the [Roadmap](#roadmap) for what exists today. Replace "Edge Healer" with your project name.
+> **Status:** early development. Phase 0 (lab, GitOps, scoped identities) is built; see [docs/phase0.md](docs/phase0.md) and the [Roadmap](#roadmap).
 
 ---
 
@@ -26,7 +26,7 @@ An autonomous self-healing agent for containerized edge services on Kubernetes. 
 
 ## Why this exists
 
-Edge sites often have intermittent connectivity and no on-call engineer nearby. Most incidents are repetitive: a bad config rollout, an OOM kill, a failing probe, a stuck pod. Edge Healer handles known failures with deterministic playbooks, uses an LLM only for novel failures, and never lets any change reach the fleet without passing independent checks and a progressive rollout.
+Edge sites often have intermittent connectivity and no on-call engineer nearby. Most incidents are repetitive: a bad config rollout, an OOM kill, a failing probe, a stuck pod. edgeloop-sentinel handles known failures with deterministic playbooks, uses an LLM only for novel failures, and never lets any change reach the fleet without passing independent checks and a progressive rollout.
 
 ## Design principles
 
@@ -132,63 +132,64 @@ New fix classes start at L1. Promotion requires meeting fix-rate and false-fix-r
 
 ## Getting started
 
-This walks through the Phase 0 lab setup. Commands are illustrative; adjust to your environment.
+This is the Phase 0 lab: a local cluster where a Git commit changes the cluster, with three scoped identities. Full detail is in [docs/phase0.md](docs/phase0.md) and [docs/identities.md](docs/identities.md).
 
 ### Prerequisites
 
-- A Linux server or VM with root access
-- `kubectl`, `helm`, `git`, and a container runtime
-- k3s or kind for the workload cluster
-- A Git repository (GitHub, GitLab, or self-hosted) for the GitOps source
-- Flux CLI (or Argo CD)
-
-### 1. Create the workload cluster
+- Windows, macOS or Linux with Docker Desktop and its Kubernetes enabled (context `docker-desktop`). Planned: a k3s VM before Phase 5.
+- `kubectl`, `flux` (CLI), `kustomize`, `git`, `bash` (Git Bash on Windows). `make` is not needed.
+- A Git remote Flux can pull from. This repo is public, so no credential is needed.
 
 ```bash
-curl -sfL https://get.k3s.io | sh -
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-kubectl get nodes
+bash scripts/check-tools.sh
 ```
 
-### 2. Bootstrap GitOps
+### 1. Prepare the cluster and images
 
 ```bash
-flux bootstrap github \
-  --owner=<your-org> \
-  --repository=<your-repo> \
-  --path=infra/clusters/lab
+bash scripts/up.sh              # checks the context, creates namespaces
+bash scripts/build-images.sh    # builds edgeloop/<app>:v1 locally (no registry)
 ```
 
-Confirm that a manifest committed to Git appears in the cluster automatically.
-
-### 3. Deploy the demo apps
+### 2. Install Flux and the identities
 
 ```bash
-kubectl apply -k apps/overlays/lab
+flux install                    # controllers only; no `flux bootstrap`, so Flux has no Git write access
+kubectl apply -f infra/rbac/    # diagnoser, fixer, deployer
+kubectl apply -f infra/flux/    # GitRepository + one Kustomization per demo app
+flux get kustomizations         # all four should become Ready
+kubectl -n apps get pods
 ```
 
-The demo set includes services that are deliberately prone to OOM, bad configuration, and crashes.
+`flux check` reports one failing item (Kubernetes v1.34 vs Flux 2.10 wanting >= 1.35). This is expected; see [docs/identities.md](docs/identities.md#kubernetes-134-vs-flux-210).
 
-### 4. Create scoped identities
+The demo apps (`apps/oom-app`, `badconfig-app`, `crash-app`, `healthy-app`) each have a `healthy` and a `broken` overlay. Flux deploys the healthy ones; point a Kustomization at a broken overlay (via Git) to reproduce the failure. `healthy-app`'s broken overlay is a decoy that must stay Ready.
 
-Create separate service accounts and kubeconfigs before building anything else:
+### 3. Identities
 
-| Identity    | Permissions                             |
-| ----------- | --------------------------------------- |
-| `diagnoser` | Read-only on cluster resources and logs |
-| `fixer`     | Write access to the Git repo only       |
-| `deployer`  | GitOps controller only                  |
-
-Verify the boundaries:
+| Identity    | Permissions                                                         |
+| ----------- | ------------------------------------------------------------------- |
+| `diagnoser` | Read-only (pods, logs, events, deployments, ...) in namespace `apps` |
+| `fixer`     | No cluster access; Git write only, via an off-cluster credential    |
+| `deployer`  | Used only by Flux, scoped to workload kinds in `apps`               |
 
 ```bash
-kubectl --kubeconfig=diagnoser.kubeconfig get pods -A      # should succeed
-kubectl --kubeconfig=diagnoser.kubeconfig delete pod <x>   # should be denied
+bash scripts/make-kubeconfig.sh diagnoser     # writes kubeconfigs/diagnoser.kubeconfig (1h token, gitignored)
+kubectl --kubeconfig kubeconfigs/diagnoser.kubeconfig -n apps get pods                  # succeeds
+kubectl --kubeconfig kubeconfigs/diagnoser.kubeconfig -n apps delete pod <name>         # Forbidden
+kubectl --kubeconfig kubeconfigs/diagnoser.kubeconfig -n apps get secrets               # Forbidden
 ```
 
-### 5. Install observability
+### 4. Verify Phase 0
 
-Deploy Prometheus, kube-state-metrics, a log pipeline (Fluent Bit or Loki), and OpenTelemetry. Break each demo app by hand and confirm the failure is clearly visible.
+```bash
+bash scripts/verify-phase0.sh          # RBAC and drift-revert checks, no Git writes
+bash scripts/verify-phase0.sh --git    # also commits and pushes test changes to main, then reverts them
+```
+
+### Next
+
+Phase 1 adds observability (Prometheus, a log pipeline, OpenTelemetry). Break each demo app and confirm the failure is visible.
 
 ## Failure catalog and evaluation
 
@@ -203,8 +204,9 @@ Each scenario defines:
 Initial scenarios: bad image tag, OOM kill, wrong environment variable, failing probe, bad config rollout, dependency outage.
 
 ```bash
-make eval SCENARIO=oom-kill     # inject, wait, report
-make eval-all                   # run the full catalog
+# Planned for Phase 2 (not implemented yet; entry points will be scripts, not make):
+#   inject a scenario, wait, report
+#   run the full catalog
 ```
 
 Tracked metrics:
