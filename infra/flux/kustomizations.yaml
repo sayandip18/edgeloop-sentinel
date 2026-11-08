@@ -1,0 +1,68 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: oom-app
+  namespace: flux-system
+spec:
+  interval: 1m
+  retryInterval: 30s
+  timeout: 2m
+  prune: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: edgeloop-sentinel
+  path: ./apps/oom-app/overlays/healthy
+  targetNamespace: apps
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: badconfig-app
+  namespace: flux-system
+spec:
+  interval: 1m
+  retryInterval: 30s
+  timeout: 2m
+  prune: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: edgeloop-sentinel
+  path: ./apps/badconfig-app/overlays/healthy
+  targetNamespace: apps
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: crash-app
+  namespace: flux-system
+spec:
+  interval: 1m
+  retryInterval: 30s
+  timeout: 2m
+  prune: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: edgeloop-sentinel
+  path: ./apps/crash-app/overlays/healthy
+  targetNamespace: apps
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: healthy-app
+  namespace: flux-system
+spec:
+  interval: 1m
+  retryInterval: 30s
+  timeout: 2m
+  prune: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: edgeloop-sentinel
+  path: ./apps/healthy-app/overlays/healthy
+  targetNamespace: apps
