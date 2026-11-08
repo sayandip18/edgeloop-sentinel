@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: badconfig-app
+  labels:
+    app: badconfig-app
+    app.kubernetes.io/part-of: edgeloop-sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: badconfig-app
+  template:
+    metadata:
+      labels:
+        app: badconfig-app
+    spec:
+      containers:
+        - name: badconfig-app
+          image: edgeloop/badconfig-app:v1
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: {name: badconfig-app-config}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}

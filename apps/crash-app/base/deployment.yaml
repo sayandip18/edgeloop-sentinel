@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crash-app
+  labels:
+    app: crash-app
+    app.kubernetes.io/part-of: edgeloop-sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crash-app
+  template:
+    metadata:
+      labels:
+        app: crash-app
+    spec:
+      containers:
+        - name: crash-app
+          image: edgeloop/crash-app:v1
+          imagePullPolicy: Never
+          env:
+            - {name: CRASH_AFTER_SECONDS, value: "0"}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
