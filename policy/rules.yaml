@@ -1,0 +1,56 @@
+# Validation gate rules (Phase 5). Data, not code: tightening a rule is a reviewed change to this file.
+# policy/gate.py enforces them. The gate is independent of whoever wrote the patch (it shares no code with the
+# fixer, playbooks or agent) and it only reads: a Git ref plus a proposed set of file changes.
+
+scope:
+  # A patch may only touch manifests inside one app's own base/ or overlays/. Everything else (infra, RBAC, policy,
+  # the watchdog, the agent itself, app source code) is out of reach of an automated change.
+  allowed_path_regex: '^apps/(?P<app>[a-z0-9][a-z0-9-]*)/(base|overlays/[a-z0-9][a-z0-9-]*)/[A-Za-z0-9._-]+\.ya?ml$'
+  max_apps: 1                 # one app per patch
+  max_files: 4
+  max_changed_lines: 40       # added + removed lines, summed over all files
+
+blast_radius:
+  # Never changeable by an automated patch, whatever else is true.
+  denied_kinds:
+    - Role
+    - ClusterRole
+    - RoleBinding
+    - ClusterRoleBinding
+    - ServiceAccount
+    - NetworkPolicy
+    - PersistentVolume
+    - PersistentVolumeClaim
+    - StorageClass
+    - Namespace
+    - Secret
+    - CustomResourceDefinition
+    - ValidatingWebhookConfiguration
+    - MutatingWebhookConfiguration
+    - PodSecurityPolicy
+  # File names that look like those, even before the content is parsed.
+  denied_filename_regex: '(?i)(rbac|role|binding|networkpolicy|netpol|pvc|persistentvolume|secret|namespace)'
+  allowed_namespaces: [apps]  # built resources must be in `apps` (or unset, Flux sets targetNamespace)
+
+kinds:
+  allowed: [Deployment, Service, ConfigMap]   # anything else in the built output is blocked
+
+workload:
+  image_allow_regex: '^edgeloop/[a-z0-9-]+:v[0-9]+$'   # local images only; no :latest, no other registry
+  max_replicas: 3
+  max_memory_mi: 512          # per container limit
+  max_cpu_m: 1000
+  require_memory_limit: true
+  require_cpu_limit: true
+  require_run_as_non_root: true
+  require_no_privilege_escalation: true
+  require_read_only_root_fs: true
+  forbid_privileged: true
+  forbid_host_namespaces: true     # hostNetwork / hostPID / hostIPC
+  forbid_host_path: true
+  forbid_added_capabilities: true
+
+tools:
+  # Missing required tools make the gate report "incomplete", which the fast path treats as blocked.
+  required: [kustomize, kubeconform, kube-linter]
+  kubeconform_args: ['-strict', '-ignore-missing-schemas', '-summary']

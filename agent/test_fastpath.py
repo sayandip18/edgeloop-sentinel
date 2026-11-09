@@ -314,6 +314,54 @@ def test_loop_declines_unknown_failure_and_dry_run_writes_nothing():
         shutil.rmtree(d, ignore_errors=True); shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _gate_world(gate_fn):
+    d = make_repo(); tmp = Path(tempfile.mkdtemp(prefix="sentinel-gate-loop-"))
+    app = "oom-app"
+    shutil.copyfile(d / "apps" / app / "overlays" / "broken" / "kustomization.yaml", d / "apps" / app / "overlays" / "healthy" / "kustomization.yaml")
+    commit(d, "eval: inject oom-kill", T_INJECT)
+    log, out = tmp / "inc.jsonl", []
+    write_incidents(log, [incident(app, ("oom_killed",), iid="inc-0001-oom-app")])
+    t = FakeGH(); st = State(tmp / "fp.jsonl")
+    fp = FastPath(NoFetchRepo(d, "main"), st, GitHub("o/r", "t", t), incidents_path=log, fetch_url="x", settle_s=30, out=out.append, gate_fn=gate_fn)
+    return d, tmp, fp, t, st, out
+
+
+def test_gate_block_means_no_pr():
+    for verdict in ({"status": "blocked", "failed": ["policy"], "skipped": [], "apps": ["oom-app"], "changed_lines": 2, "checks": []},
+                    {"status": "incomplete", "failed": [], "skipped": ["schema"], "apps": ["oom-app"], "changed_lines": 2, "checks": []}):
+        d, tmp, fp, t, st, out = _gate_world(lambda plan, v=verdict: v)
+        try:
+            fp.step(now=T_INC + 40)
+            assert not t.writes() and not st.prs(), "a blocked/incomplete gate must not open a PR"
+            assert any(e["event"] == "declined" for e in st.mem) and any("escalate" in o for o in out)
+            assert any(e["event"] == "gate" and e["level"] == "blocked" for e in st.mem)
+        finally:
+            shutil.rmtree(d, ignore_errors=True); shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_gate_pass_puts_the_report_in_the_pr():
+    ok = {"status": "pass", "failed": [], "skipped": [], "apps": ["oom-app"], "changed_lines": 2,
+          "checks": [{"name": "scope", "status": "pass", "detail": ["1 file"]}]}
+    d, tmp, fp, t, st, out = _gate_world(lambda plan: ok)
+    try:
+        fp.step(now=T_INC + 40)
+        body = [c for c in t.calls if c[1] == "/repos/o/r/pulls" and c[0] == "POST"][0][2]["body"]
+        assert "gate verdict: **pass**" in body and "autonomy decision: **L1**" in body
+    finally:
+        shutil.rmtree(d, ignore_errors=True); shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_real_gate_runs_in_the_loop():
+    d, tmp, fp, t, st, out = _gate_world(None)       # default gate_fn: the real policy/gate.py in its own process
+    try:
+        fp.step(now=T_INC + 40)
+        g = [e for e in st.mem if e["event"] == "gate"]
+        assert g and g[0]["verdict"] in ("pass", "incomplete"), g
+        assert len(st.prs()) == (1 if g[0]["level"] == "L1" else 0)
+    finally:
+        shutil.rmtree(d, ignore_errors=True); shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

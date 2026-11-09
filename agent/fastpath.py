@@ -24,6 +24,8 @@ from github import GitHub, GitHubError, preflight  # noqa: E402
 from gitrepo import GitRepo  # noqa: E402
 from incidents import read_events  # noqa: E402
 import playbooks  # noqa: E402
+sys.path.insert(0, str(ROOT / "policy"))
+import risk  # noqa: E402  (policy/risk engine; the gate itself is only ever run as a separate process)
 
 TOKEN_ENV = "FIXER_GITHUB_TOKEN"
 MAX_RETRIES = 3
@@ -134,7 +136,28 @@ def validate_plan(plan, repo):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def pr_body(inc, plan, validation, diff, declines):
+def run_gate(plan, repo, sandbox=False):
+    """Ask the independent validation gate (policy/gate.py, separate process, shares no code with the playbooks) for a
+    verdict on the plan. Anything other than a clean JSON verdict counts as 'blocked'."""
+    cmd = [sys.executable, str(ROOT / "policy" / "gate.py"), "check", "--repo", str(repo.path), "--base-ref", repo.ref,
+           "--changes-json", "-", "--json"] + (["--sandbox"] if sandbox else [])
+    r = subprocess.run(cmd, input=json.dumps(plan.files), capture_output=True, text=True, encoding="utf-8", errors="replace")
+    try:
+        return json.loads(r.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {"status": "blocked", "failed": ["gate-error"], "skipped": [], "apps": [], "changed_lines": 0,
+                "checks": [{"name": "gate-error", "status": "fail", "detail": [(r.stderr or r.stdout or "no output").strip()[:300]]}]}
+
+
+def gate_summary(v, decision):
+    lines = [f"- gate verdict: **{v['status']}**; autonomy decision: **{decision['level']}** (risk score {decision['score']})"]
+    for c in v["checks"]:
+        lines.append(f"  - {c['status']}: {c['name']}" + (f" ({md_code('; '.join(c['detail']), 160)})" if c["detail"] else ""))
+    lines.append(f"  - risk reasons: {md_code('; '.join(decision['reasons']), 240)}")
+    return "\n".join(lines)
+
+
+def pr_body(inc, plan, validation, diff, declines, gate_text=""):
     sigs = "\n".join(f"- {md_code(s['type'], 40)} on {md_code(s['app'], 60)}: {md_code(s['detail'])}" for s in inc["signals"])
     return "\n".join([
         f"**Automated fix proposal** (deterministic playbook {md_code(plan.playbook)}, no LLM). Autonomy level L1: nothing "
@@ -146,6 +169,7 @@ def pr_body(inc, plan, validation, diff, declines):
         "### Change", *[f"- {c}" for c in plan.changes], "", "```diff", diff, "```", "",
         "### Checks run before opening this PR",
         f"- kustomize build of the app as Flux deploys it: {validation}",
+        *([gate_text] if gate_text else []),
         "- the commit touches only files under the app's own `base/` and `overlays/` (playbook rule)", "",
         "### Rollback", "Revert this PR. Flux reconciles within about a minute.",
         *(["", "<details><summary>Playbooks that did not apply</summary>", "",
@@ -154,12 +178,15 @@ def pr_body(inc, plan, validation, diff, declines):
 
 # --- the loop ------------------------------------------------------------------------------
 class FastPath:
-    def __init__(self, repo, state, gh, *, incidents_path, fetch_url, settle_s=30.0, max_prs_per_day=3, dry_run=False, cfg=None, out=print):
+    def __init__(self, repo, state, gh, *, incidents_path, fetch_url, settle_s=30.0, max_prs_per_day=3, dry_run=False, cfg=None, out=print,
+                 gate_fn=None, sandbox=False, autonomy=None):
         self.repo, self.state, self.gh, self.fetch_url = repo, state, gh, fetch_url
         self.state_incidents = incidents_path
         self.settle_s, self.max_prs, self.dry_run = settle_s, max_prs_per_day, dry_run
         self.cfg, self.out = cfg or playbooks.Config(), out
         self._dry_seen = set()
+        self.gate_fn = gate_fn or (lambda plan: run_gate(plan, repo, sandbox))
+        self.autonomy = autonomy
 
     def reconcile(self):
         """Fold PR outcomes (merged / closed) into state and tidy up our own branch."""
@@ -219,8 +246,17 @@ class FastPath:
         err = validate_plan(plan, self.repo)
         if err:
             return self.decline(inc, f"plan from {plan.playbook} failed validation: {err}", declines)
+        verdict = self.gate_fn(plan)
+        meta = {"playbook": plan.playbook, "app": plan.app, "files": plan.files, "old": {p: self.repo.read(p) for p in plan.files}}
+        decision = risk.decide(verdict, meta, self.autonomy)
+        if not self.dry_run:
+            self.state.add("gate", incident=inc["id"], app=plan.app, playbook=plan.playbook, verdict=verdict["status"],
+                       level=decision["level"], failed=verdict.get("failed", []), score=decision["score"])
+        if decision["level"] in ("blocked", "L0"):
+            self.out(f"gate      {inc['id']}: {decision['level']} ({'; '.join(decision['reasons'])})")
+            return self.decline(inc, f"gate/policy: {decision['level']}: {'; '.join(decision['reasons'])}", declines)
         diff = render_diff(plan, self.repo)
-        body = pr_body(inc, plan, "ok", diff, declines)
+        body = pr_body(inc, plan, "ok", diff, declines, gate_summary(verdict, decision))
         if self.dry_run:
             self._dry_seen.add(inc["id"])
             self.out(f"dry-run   {inc['id']}: would open PR {plan.title!r} from {plan.playbook}\n{diff}")
@@ -252,6 +288,7 @@ def main():
     r.add_argument("--settle", type=float, default=30.0, help="wait this long after an incident opens so late signals are in")
     r.add_argument("--max-prs-per-day", type=int, default=3)
     r.add_argument("--dry-run", action="store_true", help="plan and validate, print the diff, open nothing (no token needed)")
+    r.add_argument("--sandbox", action="store_true", help="also reproduce-then-fix in a vcluster (slow; needs a cluster and vcluster)")
     r.add_argument("--once", action="store_true")
     r.add_argument("--duration", type=float, default=0)
     r.add_argument("--allow-admin-token", action="store_true", help="NOT recommended: token belongs to a repo admin")
@@ -287,7 +324,7 @@ def main():
         if problems:
             print("REFUSING to start:\n  " + "\n  ".join(problems), file=sys.stderr); return 2
     state = State(a.state)
-    fp = FastPath(repo, state, gh, incidents_path=a.incidents, fetch_url=fetch_url, settle_s=a.settle, max_prs_per_day=a.max_prs_per_day, dry_run=a.dry_run)
+    fp = FastPath(repo, state, gh, incidents_path=a.incidents, fetch_url=fetch_url, settle_s=a.settle, max_prs_per_day=a.max_prs_per_day, dry_run=a.dry_run, sandbox=a.sandbox)
     state.add("started", dry_run=a.dry_run, repo=repo_name)
     print(f"fastpath started repo={repo_name} dry_run={a.dry_run} incidents={a.incidents}", flush=True)
     t0 = time.time()

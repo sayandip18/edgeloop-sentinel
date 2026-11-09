@@ -90,7 +90,10 @@ Phases 4 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md`
 
 ## Phase 5: Safety rails
 
+**Status: implemented, verified offline; live sandbox and watchdog runs pending.** See [phase5.md](phase5.md). k3s move deferred (not required); sandbox = vcluster; Python gate + host watchdog; Argo Rollouts/Flagger and image scanning not done.
+
 **Goal:** bad patches are blocked or reverted.
+**Verified by:** `scripts/verify-phase5.sh [--cluster]`.
 
 **Scope**
 - **Move to a k3s VM first** (planned since Phase 0; also clears the Flux 2.10 / k8s 1.34 warning).
@@ -157,6 +160,6 @@ Code patches (always human-reviewed first), a small local model for offline tria
 | Docker Desktop memory vs full kube-prometheus-stack | Phase 1 |
 | ~~Whether playbooks use the fixer identity and PAT~~ decided: yes, a fine-grained PAT (phase4.md) | Phase 4 |
 | Branch protection on `main` (required): **owner action still pending** | Before Phase 4 |
-| Sandbox technology (vcluster vs kind with gVisor) | Phase 5 |
+| ~~Sandbox technology~~ decided: vcluster | Phase 5 |
 | LLM provider, model and budget | Phase 6 |
 | Escalation channel | Phase 8 |

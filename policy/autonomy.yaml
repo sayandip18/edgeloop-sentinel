@@ -1,0 +1,26 @@
+# Autonomy policy (Phase 5): the most a fix class may do on its own. Every class starts at L1 (open a PR, a human
+# merges). Promotion is Phase 9 and happens only from measured eval results. policy/risk.py reads this file.
+#   L0 notify only (no PR)   L1 PR for human approval   L2/L3 auto-apply (nothing is allowed there yet)
+
+default_level: L0             # a fix class not listed here may only notify
+
+classes:
+  revert-recent-change: L1
+  raise-memory-limit: L1
+
+apps:                         # criticality raises the risk score; unknown apps count as 'normal'
+  web-app: high
+  backend-app: high
+  oom-app: normal
+  badconfig-app: normal
+  crash-app: normal
+  healthy-app: normal
+
+risk:
+  # Score = sum of the contributions below. Score >= l0_at downgrades L1 to L0 (a human is told, no PR is opened).
+  l0_at: 60
+  per_changed_line: 1.5
+  touches_base: 15            # base/ is shared by every overlay; an overlay-only change is narrower
+  high_criticality: 20
+  memory_change_over_2x: 25
+  deletes_a_file: 20
