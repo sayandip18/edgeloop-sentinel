@@ -122,7 +122,7 @@ check_identities() {
   can "$dp" no  "deployer (apps) create deployments in observability" create deployments.apps -n observability
   can "$dg" no  "diagnoser create deployments in observability" create deployments.apps -n observability
   can "$dg" no  "diagnoser get secrets in observability" get secrets -n observability
-  can "$dg" no  "diagnoser proxy services in observability (no Prometheus/Loki route yet)" get services/proxy -n observability
+  can "$dg" no  "diagnoser proxy services in observability without a name (only the two named query services, since Phase 6)" get services/proxy -n observability
   can "$dg" no  "diagnoser get pods/log in observability" get pods/log -n observability
 }
 

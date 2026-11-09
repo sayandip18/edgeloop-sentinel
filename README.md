@@ -238,7 +238,7 @@ Tracked metrics:
 | 3     | Detection and incident manager                       | One incident per failure                 |
 | 4     | Deterministic fast path                              | Known failures self-heal via PR          |
 | 5     | Safety rails: validation, sandbox, rollout, watchdog | Bad patches are blocked or reverted      |
-| 6     | Context builder and diagnosis agent (read-only)      | Measured diagnosis accuracy              |
+| 6     | Context builder and diagnosis agent (read-only)      | Measured diagnosis accuracy (built; first LLM run pending) |
 | 7     | Fix agent (manifests and config, at L1)              | Low false-fix rate on evals              |
 | 8     | Escalation and learning loop                         | Rejected fixes are not re-proposed       |
 | 9     | Hardening and graduated autonomy                     | Fix classes promoted by metrics          |

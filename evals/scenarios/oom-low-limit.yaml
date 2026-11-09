@@ -1,0 +1,14 @@
+id: oom-low-limit
+description: "Novel variant of oom-kill: the app's allocation is unchanged (32 MiB) but its memory limit was lowered to 24Mi, so the cause is the limit, not the app."
+novel: true
+inject: {app: oom-app, overlay: low-limit}
+observe:
+  app: oom-app
+  symptom: {type: container_reason, reasons: [OOMKilled]}
+recovery: {apps: [oom-app]}
+expected:
+  action: fix
+  diagnosis:
+    category: oom
+    target_app: oom-app
+    keywords: ["limit|memory"]

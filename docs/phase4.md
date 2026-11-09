@@ -59,7 +59,7 @@ Deliberately not automated: app source code, anything outside `apps/<app>/base|o
 
     # exit criterion
     bash scripts/verify-phase4.sh            # offline, no Git writes
-    bash scripts/verify-phase4.sh --git      # all 8 scenarios, real PRs; add --manual to merge them yourself
+    bash scripts/verify-phase4.sh --git      # all 13 scenarios, real PRs; add --manual to merge them yourself
 
 `evals/run.py run <ids|all> --fastpath [--approve auto|manual]` implies `--detector`. The runner plays the human: with `auto` it fast-forwards `main` to the PR branch and pushes (your git credentials; GitHub then shows the PR as merged), with `manual` it waits up to `APPROVE_TIMEOUT` (900s) for you to merge on GitHub. Per scenario it scores exactly one PR on the true target app (none for the decoy) and whether the cluster recovered because of the merge. New result fields: `fastpath`, aggregate `fastpath_rate` and `median_time_to_pr_s`. `fix_rate` and `median_time_to_recovery_s` now include the PR path (with `auto` approval, so it excludes human latency). `diagnosis_accuracy` stays null: diagnosis is Phase 6.
 

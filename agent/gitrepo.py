@@ -36,12 +36,20 @@ class GitRepo:
         return self.show(self.ref, path)
 
     def log(self, prefix, limit=10):
-        out = self._git("log", self.ref, "-n", str(limit), "--format=%H%x1f%ct%x1f%an%x1f%s", "--", prefix).stdout.decode("utf-8")
+        """prefix: one pathspec or a list of them."""
+        specs = [prefix] if isinstance(prefix, str) else list(prefix)
+        out = self._git("log", self.ref, "-n", str(limit), "--format=%H%x1f%ct%x1f%an%x1f%s", "--", *specs).stdout.decode("utf-8")
         res = []
         for line in out.splitlines():
             sha, ts, author, subject = line.split("\x1f", 3)
             res.append(Commit(sha, float(ts), author, subject))
         return res
+
+    def diff(self, sha, prefix, max_bytes=6000):
+        """Unified diff of one commit (vs its first parent) limited to `prefix`, truncated to max_bytes."""
+        specs = [prefix] if isinstance(prefix, str) else list(prefix)
+        out = self._git("show", "--format=", "--no-color", "-U2", sha, "--", *specs).stdout.decode("utf-8", "replace")
+        return out if len(out) <= max_bytes else out[:max_bytes] + "\n[... diff truncated]"
 
     def changed(self, sha):
         """[(status, path)] for one commit vs its first parent. Merge commits yield [] (the playbooks decline those)."""

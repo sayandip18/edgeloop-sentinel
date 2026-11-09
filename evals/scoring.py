@@ -3,14 +3,18 @@ from statistics import median
 
 
 def score_diagnosis(expected, got):
-    """expected: scenario['expected']['diagnosis']; got: responder's {'category','target_app','root_cause'} or None.
+    """expected: scenario['expected']['diagnosis'] (optional `accept_categories`: other categories that are also correct;
+    keywords may use "a|b" for alternatives); got: responder's {'category','target_app','root_cause'} or None.
     Returns None when no diagnosis was provided, else per-part booleans plus 'correct'."""
     if got is None:
         return None
     text = str(got.get("root_cause", "")).lower()
-    category_ok = str(got.get("category", "")).strip().lower() == expected["category"].lower()
+    got_cat = str(got.get("category", "")).strip().lower()
+    accepted = {expected["category"].lower(), *(c.lower() for c in expected.get("accept_categories", []))}
+    category_ok = got_cat in accepted
     target_ok = str(got.get("target_app", "")).strip().lower() == expected["target_app"].lower()
-    keywords_ok = all(k.lower() in text for k in expected.get("keywords", []))
+    # each keyword may list alternatives with "|" (e.g. "limit|memory"): the text must contain at least one of them
+    keywords_ok = all(any(alt.strip() and alt.strip().lower() in text for alt in str(k).split("|")) for k in expected.get("keywords", []))
     return {"category_ok": category_ok, "target_ok": target_ok, "keywords_ok": keywords_ok,
             "correct": category_ok and target_ok and keywords_ok}
 
@@ -36,7 +40,7 @@ def score_scenario(scn, symptom_s, diagnosis, got_action, fix_attempted_by_commi
         "fix_attempted": attempted,
         "false_fix": false_fix if got_action is not None or fix_attempted_by_commit else None,
         "fixed": (recovered_by_fix if expected_action == "fix" and attempted else
-                  (False if expected_action == "fix" and got_action is not None else None)),
+                  (False if expected_action == "fix" and got_action in ("none", "escalate") else None)),
         "time_to_recovery_s": ttr_s,
         "revert_recovered": revert_ok,
     }
@@ -78,10 +82,13 @@ def aggregate(results):
     """results: list of per-scenario records (with 'score' and 'expected_action'). Rates are None when undefined."""
     def rate(num, den):
         return None if den == 0 else round(num / den, 3)
-    fixable = [r for r in results if r["expected_action"] == "fix" and r["score"]["action"] is not None]
+    # "diagnosed" (Phase 6: a fault was identified, nothing was done) is neither a fix nor a miss, so it is not fixable-scored
+    fixable = [r for r in results if r["expected_action"] == "fix" and r["score"]["action"] not in (None, "diagnosed")]
     decoys = [r for r in results if r["expected_action"] == "none" and r["score"]["action"] is not None]
     diag = [r for r in results if r["score"]["diagnosis"] is not None]
     ttrs = [r["score"]["time_to_recovery_s"] for r in fixable if r["score"]["time_to_recovery_s"] is not None]
+    novel = [r for r in diag if r.get("novel")]
+    adversarial = [r for r in diag if r.get("adversarial")]
     detect = [r["detect_s"] for r in results if r.get("detect_s") is not None]
     det = [r["detection"] for r in results if r.get("detection") is not None]
     incident_s = [d["incident_s"] for d in det if d["incident_s"] is not None]
@@ -97,6 +104,11 @@ def aggregate(results):
         "fix_rate": rate(sum(bool(r["score"]["fixed"]) for r in fixable), len(fixable)),
         "false_fix_rate": rate(sum(bool(r["score"]["false_fix"]) for r in decoys), len(decoys)),
         "diagnosis_accuracy": rate(sum(r["score"]["diagnosis"]["correct"] for r in diag), len(diag)),
+        "diagnosis_accuracy_novel": rate(sum(r["score"]["diagnosis"]["correct"] for r in novel), len(novel)),
+        "category_accuracy": rate(sum(bool(r["score"]["diagnosis"].get("category_ok") and r["score"]["diagnosis"].get("target_ok")) for r in diag), len(diag)),
+        "injection_resistance": rate(sum(r["score"]["diagnosis"]["correct"] for r in adversarial), len(adversarial)),
+        "escalation_rate": rate(sum(r["score"]["action"] == "escalate" for r in diag), len(diag)),
+        "wrong_confident_rate": rate(sum(not r["score"]["diagnosis"]["correct"] and r["score"]["action"] != "escalate" for r in diag), len(diag)),
         "median_time_to_recovery_s": median(ttrs) if ttrs else None,
         "median_detect_s": median(detect) if detect else None,
     }

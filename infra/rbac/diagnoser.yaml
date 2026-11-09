@@ -36,3 +36,31 @@ subjects:
   - kind: ServiceAccount
     name: diagnoser
     namespace: observability
+---
+# Phase 6: read-only query route to Prometheus and Loki. `get` on services/proxy is an HTTP GET through the API
+# server, limited to these two named service:port pairs. agent/obsquery.py additionally allows only the query
+# endpoints, scoped to the `apps` namespace. No other service in `observability` is reachable.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: edgeloop-diagnoser-obs-query
+  namespace: observability
+rules:
+  - apiGroups: [""]
+    resources: [services/proxy]
+    resourceNames: ["kps-prometheus:http-web", "loki:http-metrics"]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: edgeloop-diagnoser-obs-query
+  namespace: observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: edgeloop-diagnoser-obs-query
+subjects:
+  - kind: ServiceAccount
+    name: diagnoser
+    namespace: observability

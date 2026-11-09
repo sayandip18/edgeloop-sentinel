@@ -43,7 +43,7 @@ if [ $DO_GIT = 1 ]; then
   python - "$res" <<'PY' && pass "every scenario: exactly one incident on the true target app; decoy: none" || fail "incident counts wrong (see above)"
 import json,sys
 d=json.load(open(sys.argv[1])); bad=[]
-assert len(d["results"])==8, f"{len(d['results'])} scenarios ran"
+assert len(d["results"])==13, f"{len(d['results'])} scenarios ran"
 for r in d["results"]:
     det=r.get("detection")
     print(f"    {r['id']:<22} incidents={det['count']} expected={det['expected']} app={[i['app'] for i in r['incidents']]}")

@@ -75,6 +75,8 @@ def validate(scns):
         d = s["expected"].get("diagnosis", {})
         if d.get("category") not in CATEGORIES: e(f"unknown diagnosis category {d.get('category')}")
         if "target_app" not in d: e("expected.diagnosis.target_app missing")
+        for c in d.get("accept_categories", []):
+            if c not in CATEGORIES or c == "none": e(f"accept_categories has invalid category {c!r}")
         if (s["expected"]["action"] == "none") != (d.get("category") == "none"): e("action 'none' must pair with category 'none'")
         for a in s["recovery"]["apps"]:
             if not (ROOT / "apps" / a).is_dir(): e(f"recovery app '{a}' not in apps/")
@@ -246,7 +248,8 @@ def approve_pr(pr, fstate, mode):
 
 def run_scenario(scn, responder, responder_timeout, detector=False, fastpath=False, approve="auto"):
     rec = {"id": scn["id"], "expected_action": scn["expected"]["action"], "started": datetime.datetime.now().isoformat(timespec="seconds"),
-           "detect_s": None, "notes": []}
+           "detect_s": None, "notes": [],
+           "novel": bool(scn.get("novel")), "adversarial": bool(scn.get("adversarial"))}
     app, apps_to_check = scn["inject"]["app"], scn["recovery"]["apps"]
     if not all_healthy(apps_to_check):
         rec["notes"].append("baseline not healthy; refused to inject")

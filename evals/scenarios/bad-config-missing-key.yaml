@@ -1,0 +1,14 @@
+id: bad-config-missing-key
+description: "Novel variant of bad-config: LISTEN_PORT is removed from badconfig-app's ConfigMap (missing, not malformed); the app exits 2 on start."
+novel: true
+inject: {app: badconfig-app, overlay: missing-key}
+observe:
+  app: badconfig-app
+  symptom: {type: restarts, min: 2}
+recovery: {apps: [badconfig-app]}
+expected:
+  action: fix
+  diagnosis:
+    category: bad_config
+    target_app: badconfig-app
+    keywords: [LISTEN_PORT]

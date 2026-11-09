@@ -10,7 +10,7 @@
 | --- | --- |
 | Stack size | Lean (Docker Desktop has about 7.4 GiB): Prometheus + operator + kube-state-metrics, Loki single binary, Alloy. No Grafana, Alertmanager, node-exporter, admission webhooks or control-plane scrapes. Memory limits total roughly 1.7 GiB. |
 | Deploy identity | New `obs-deployer` ServiceAccount (flux-system). `deployer` stays scoped to `apps`. |
-| Diagnoser access to Prometheus/Loki | **Deferred to Phase 6.** The diagnoser has no route to either API yet (the verifier asserts it cannot proxy services in `observability`). Phase 6 will add a read-only query proxy that allows only query endpoints. Humans and the verifier use the API server service proxy with the admin context. |
+| Diagnoser access to Prometheus/Loki | **Deferred to Phase 6; built there** ([phase6.md](phase6.md)). The diagnoser has no route to either API yet (the verifier asserts it cannot proxy services in `observability`). Phase 6 will add a read-only query proxy that allows only query endpoints. Humans and the verifier use the API server service proxy with the admin context. |
 | Log collection | Alloy as a Deployment tailing `apps` pods through the Kubernetes API (no hostPath mounts). Only `apps` is collected. |
 | Exit code | Lives in Kubernetes state, so it is checked in metrics (`kube_pod_container_status_last_terminated_exitcode`), not Loki. Loki holds the log lines. |
 | Storage | None persistent. Prometheus keeps 24h, Loki 24h, both lost on pod restart. Lab only. |

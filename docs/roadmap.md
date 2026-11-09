@@ -2,14 +2,14 @@
 
 Detailed plan for each phase. The one-table summary lives in the [README](../README.md#roadmap). This file adds scope, deliverables, prerequisites and how each exit criterion is verified.
 
-Phases 4 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md` when work on it starts, so this file does not drift from what was built. Items marked *(decision needed)* are open.
+Phases 7 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md` when work on it starts, so this file does not drift from what was built. Items marked *(decision needed)* are open.
 
 ## Fixed constraints (apply to every phase)
 
 - **Design principles** (README): safety rails before intelligence; GitOps is the only write path; deterministic playbooks before the LLM; separate identities (diagnoser read-only, fixer Git-only, deployer Flux-only); the verifier is independent of the patch author; logs are untrusted input; graduated autonomy.
 - **Every phase ends with a script** `scripts/verify-phaseN.sh` that checks its exit criterion and reports failures plainly.
 - **Cluster:** Docker Desktop Kubernetes (v1.34.1) until Phase 5, then a k3s VM.
-- **Agent code** lives in `agent/`. Nothing in it is built before Phase 6.
+- **Agent code** lives in `agent/`. The LLM agent arrives in Phase 6 (diagnosis) and Phase 7 (fixes).
 - **No commit or push** is made without the owner's go-ahead; new software is installed only after approval.
 
 ## Phase 0: Lab, GitOps, scoped identities
@@ -107,6 +107,9 @@ Phases 4 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md`
 
 ## Phase 6: Context builder and diagnosis agent (read-only)
 
+**Status: implemented; verified offline and read-only against the live cluster; smoke-tested with the real model (healthy app, two injection payloads). The `--live` exit-criterion run is pending.** See [phase6.md](phase6.md). OpenAI `gpt-5`; Prometheus/Loki query route built; diagnoses written to the incident log; 5 new scenarios (3 novel, 2 prompt-injection).
+**Verified by:** `scripts/verify-phase6.sh [--cluster|--live]`.
+
 **Goal:** measured diagnosis accuracy.
 
 **Scope**
@@ -161,5 +164,5 @@ Code patches (always human-reviewed first), a small local model for offline tria
 | ~~Whether playbooks use the fixer identity and PAT~~ decided: yes, a fine-grained PAT (phase4.md) | Phase 4 |
 | Branch protection on `main` (required): **owner action still pending** | Before Phase 4 |
 | ~~Sandbox technology~~ decided: vcluster | Phase 5 |
-| LLM provider, model and budget | Phase 6 |
+| ~~LLM provider, model and budget~~ decided: OpenAI gpt-5, hard per-diagnosis caps (phase6.md) | Phase 6 |
 | Escalation channel | Phase 8 |

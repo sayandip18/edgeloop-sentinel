@@ -77,7 +77,7 @@ def test_revert_plan_for_every_fix_scenario():
             err = validate_plan(plan, repo)
             assert err is None, f"{sid}: {err}"
             git(d, "reset", "-q", "--hard", base); n += 1
-        assert n == 7, n
+        assert n == sum(1 for x in SCN.values() if x['expected']['action'] == 'fix'), n
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

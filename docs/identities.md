@@ -4,7 +4,7 @@ Principle 4: separate roles, separate identities. Each identity can do exactly o
 
 | Identity | Where it lives | Credential | Can do | Cannot do |
 | --- | --- | --- | --- | --- |
-| `diagnoser` | ServiceAccount in `observability` | Short-lived token via `scripts/make-kubeconfig.sh diagnoser` | get/list/watch pods, pods/log, events, configmaps, deployments, replicasets **in `apps` only** | any write, secrets, exec, anything outside `apps`, nodes |
+| `diagnoser` | ServiceAccount in `observability` | Short-lived token via `scripts/make-kubeconfig.sh diagnoser` | get/list/watch pods, pods/log, events, configmaps, deployments, replicasets **in `apps` only**; since Phase 6, `get` on `services/proxy` for only `kps-prometheus:http-web` and `loki:http-metrics` in `observability` (query route; `agent/obsquery.py` allows only query endpoints) | any write, secrets, exec, anything outside `apps` (other than the two query services), nodes |
 | `fixer` | ServiceAccount in `observability` with **no bindings** | Off-cluster Git credential (see below) | Push a branch and open a PR in this repo | Anything in Kubernetes (denied everything) |
 | `deployer` | ServiceAccount in `flux-system` | None issued; Flux impersonates it | create/update/patch/delete configmaps, services, deployments, replicasets **in `apps` only** | Anything else, including RBAC, secrets, other namespaces |
 | `obs-deployer` | ServiceAccount in `flux-system` | None issued; Flux impersonates it | Install the observability stack: CRDs, ClusterRoles, workloads in `observability` (Phase 1) | Write to `apps`, read secrets outside `observability`, exec. Effectively privileged because charts create ClusterRoles: review changes like a cluster-admin grant |

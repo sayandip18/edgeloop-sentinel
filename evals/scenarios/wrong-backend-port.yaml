@@ -1,0 +1,14 @@
+id: wrong-backend-port
+description: "Novel: web-app's BACKEND_URL has the wrong port (8081). web-app stays Running but never Ready while backend-app is perfectly healthy, so it looks like a dependency outage but is not."
+novel: true
+inject: {app: web-app, overlay: wrong-backend-port}
+observe:
+  app: web-app
+  symptom: {type: not_ready}
+recovery: {apps: [web-app]}
+expected:
+  action: fix
+  diagnosis:
+    category: bad_env_var
+    target_app: web-app
+    keywords: [BACKEND_URL]

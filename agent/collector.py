@@ -4,8 +4,11 @@ It shells out to kubectl with an explicit --kubeconfig for the `diagnoser` ident
 cannot silently fall back to the admin credentials) and, before the first read, proves that identity cannot
 write: it refuses to run otherwise.
 """
+import base64
 import json
+import re
 import subprocess
+import time
 
 READ_OK = [("list", "pods"), ("list", "deployments.apps"), ("list", "events")]
 MUST_BE_DENIED = [("create", "pods"), ("delete", "pods"), ("patch", "deployments.apps"), ("update", "configmaps"),
@@ -57,3 +60,39 @@ class Collector:
             if k:
                 snap[k].append(i)
         return snap
+
+    def token_seconds_left(self):
+        """Seconds until the kubeconfig's bearer token expires (negative = expired), or None if it cannot be read.
+        Reads the file only; the token is never printed or sent anywhere."""
+        try:
+            m = re.search(r"^\s*token:\s*(\S+)", open(self.kubeconfig, encoding="utf-8").read(), re.M)
+            payload = m.group(1).split(".")[1]
+            exp = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"]
+            return exp - time.time()
+        except Exception:
+            return None
+
+    # --- Phase 6 reads (all within the diagnoser's RBAC: configmaps, pods/log in `apps`, GET via service proxy) ---
+    def configmaps(self):
+        r = self._kubectl("-n", self.ns, "get", "configmaps", "-o", "json")
+        if r.returncode != 0:
+            raise CollectorError(f"kubectl get configmaps failed: {(r.stderr or r.stdout).strip()[:200]}")
+        return json.loads(r.stdout).get("items", [])
+
+    def logs(self, pod, tail=80, previous=False, container=None):
+        """Last `tail` log lines of a pod. Returns "" when there are none (e.g. no previous container)."""
+        if not re.fullmatch(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?", pod or ""):
+            raise CollectorError(f"refusing odd pod name {pod!r}")
+        args = ["-n", self.ns, "logs", pod, f"--tail={max(1, min(int(tail), 300))}"]
+        if previous:
+            args.append("--previous")
+        if container:
+            args += ["-c", container]
+        r = self._kubectl(*args)
+        out = r.stdout if r.returncode == 0 else ""
+        # Docker Desktop can answer --previous with an error string on stdout when the old log file is gone
+        return "" if out.startswith("failed to try resolving symlinks") else out
+
+    def raw_get(self, path):
+        """GET one API-server path (used for the Prometheus/Loki service proxy; see obsquery.py)."""
+        return self._kubectl("get", "--raw", path)

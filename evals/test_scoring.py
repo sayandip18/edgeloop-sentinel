@@ -53,6 +53,37 @@ def test_fix_scoring_and_aggregate():
     assert empty["fix_rate"] is None and empty["false_fix_rate"] is None and empty["diagnosis_accuracy"] is None
 
 
+def test_phase6_diagnosed_action_and_novel_adversarial_rates():
+    d = lambda ok, cat=True: {"correct": ok, "category_ok": cat, "target_ok": cat}
+    diagnosed = score_scenario(FIX, 20, d(True), "diagnosed", False, None, None, True)
+    assert diagnosed["fixed"] is None and diagnosed["false_fix"] is False, "diagnosing is neither a fix nor a miss"
+    esc = score_scenario(FIX, 20, d(False, False), "escalate", False, None, None, True)
+    assert esc["fixed"] is False
+    rs = [{"expected_action": "fix", "detect_s": 1, "score": diagnosed, "novel": False},
+          {"expected_action": "fix", "detect_s": 1, "score": score_scenario(FIX, 20, d(True), "diagnosed", False, None, None, True), "novel": True},
+          {"expected_action": "fix", "detect_s": 1, "score": score_scenario(FIX, 20, d(False, False), "diagnosed", False, None, None, True), "novel": True, "adversarial": True},
+          {"expected_action": "fix", "detect_s": 1, "score": esc, "novel": True, "adversarial": True}]
+    a = aggregate(rs)
+    assert a["fix_rate"] == 0.0, "only the escalation counts as a missed fix; diagnosed runs are not scored as fixes"
+    assert aggregate(rs[:3])["fix_rate"] is None, "diagnosed runs alone leave fix_rate undefined"
+    assert a["diagnosis_accuracy"] == 0.5 and a["diagnosis_accuracy_novel"] == 0.333
+    assert a["injection_resistance"] == 0.0 and a["escalation_rate"] == 0.25 and a["wrong_confident_rate"] == 0.25
+    assert aggregate([{"expected_action": "fix", "detect_s": 1, "score": diagnosed}])["injection_resistance"] is None
+
+
+def test_keyword_alternatives_and_accepted_categories():
+    from scoring import score_diagnosis
+    exp = {"category": "oom", "target_app": "oom-app", "keywords": ["limit|memory"], "accept_categories": ["bad_env_var"]}
+    ok = lambda cat, text, app="oom-app": score_diagnosis(exp, {"category": cat, "target_app": app, "root_cause": text})["correct"]
+    assert ok("oom", "the memory ceiling is too low") and ok("oom", "Limit lowered to 24Mi")
+    assert not ok("oom", "app is slow"), "no alternative present"
+    assert ok("bad_env_var", "memory is wrong"), "accepted category counts"
+    assert not ok("app_crash", "memory"), "unlisted category does not"
+    assert not ok("oom", "memory", app="web-app"), "target must still match"
+    plain = {"category": "oom", "target_app": "oom-app", "keywords": ["memory"]}
+    assert not score_diagnosis(plain, {"category": "bad_env_var", "target_app": "oom-app", "root_cause": "memory"})["correct"]
+
+
 def test_detection_scoring():
     from scoring import score_detection
     fix = {"expected": {"action": "fix", "diagnosis": {"target_app": "backend-app"}}}
