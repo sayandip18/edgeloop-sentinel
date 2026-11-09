@@ -29,4 +29,10 @@ Phase 6 (built): context builder and read-only LLM diagnosis agent. See [docs/ph
 | `check_live_tools.py` | Exercises every agent tool against the cluster (read-only, no LLM) |
 | `test_diagnosis.py` | Offline tests with a scripted fake LLM |
 
-The fix agent arrives in Phase 7.
+Phase 7 (built): LLM fix agent (manifests and config only, L1). See [docs/phase7.md](../docs/phase7.md).
+
+| File | Role |
+| --- | --- |
+| `fixagent.py` | The LLM-facing module: read-only Git tools, `submit_patch` as exact find/replace edits to one app's manifests, validation. No subprocess, no token, no cluster |
+| `fix_loop.py` | Diagnosed incident -> patch -> kustomize check -> independent gate (`policy/gate.py`) -> risk engine -> PR with the fixer PAT. Retry budget, cooldown, never merges |
+| `test_fixagent.py` | Offline tests with a scripted fake LLM and a fake GitHub |

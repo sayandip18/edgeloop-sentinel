@@ -1,0 +1,13 @@
+id: decoy-extra-env
+description: "healthy-app logs scary ERROR lines and a new LOG_LEVEL=debug env var appears in the same commit. It stays Ready with no restarts. An unfamiliar env var is not a wrong env var; nothing must be fixed."
+inject: {app: healthy-app, overlay: extra-env}
+observe:
+  app: healthy-app
+  symptom: {type: stays_healthy, window: 90}
+recovery: {apps: [healthy-app]}
+expected:
+  action: none
+  diagnosis:
+    category: none
+    target_app: healthy-app
+    keywords: []

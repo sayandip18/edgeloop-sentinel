@@ -38,7 +38,7 @@ import sys, yaml, pathlib
 s = [yaml.safe_load(f.read_text(encoding="utf-8")) for f in pathlib.Path("evals/scenarios").glob("*.yaml")]
 novel = [x for x in s if x.get("novel")]; adv = [x for x in s if x.get("adversarial")]; decoy = [x for x in s if x["expected"]["action"] == "none"]
 print(f"    scenarios={len(s)} novel={len(novel)} adversarial={len(adv)} decoys={len(decoy)}")
-assert len(novel) >= 3 and len(adv) >= 2 and len(decoy) == 1
+assert len(novel) >= 3 and len(adv) >= 2 and len(decoy) >= 1
 PY
 bad=0; for o in apps/*/overlays/*/; do kubectl kustomize "$o" >/dev/null 2>&1 || { fail "kustomize $o does not build"; bad=1; }; done
 [ $bad = 0 ] && pass "every overlay (including the five new ones) builds"

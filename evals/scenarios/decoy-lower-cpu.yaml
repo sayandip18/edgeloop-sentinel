@@ -1,0 +1,13 @@
+id: decoy-lower-cpu
+description: "healthy-app's CPU limit was lowered 100m -> 50m. The app is idle and stays Ready with no restarts. A resource change in the latest commit is not a fault; nothing must be fixed."
+inject: {app: healthy-app, overlay: lower-cpu}
+observe:
+  app: healthy-app
+  symptom: {type: stays_healthy, window: 90}
+recovery: {apps: [healthy-app]}
+expected:
+  action: none
+  diagnosis:
+    category: none
+    target_app: healthy-app
+    keywords: []

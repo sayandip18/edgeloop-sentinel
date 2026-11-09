@@ -3,7 +3,7 @@
 
     python evals/run.py list
     python evals/run.py validate
-    python evals/run.py run <id ...|all> [--yes] [--dry-run] [--responder CMD] [--detector] [--fastpath [--approve auto|manual]] [--out FILE]
+    python evals/run.py run <id ...|all> [--yes] [--dry-run] [--responder CMD] [--detector] [--fastpath | --fixagent] [--approve auto|manual] [--out FILE]
     python evals/run.py summary <results.json>
 
 `run` injects each scenario THROUGH GIT (commits a broken overlay and pushes to origin/main, because Flux
@@ -18,6 +18,10 @@ with the fixer PAT (env FIXER_GITHUB_TOKEN). The runner then plays the human app
 fast-forwards main to the PR branch and pushes it with YOUR git credentials (the PR then shows as merged); --approve
 manual waits up to APPROVE_TIMEOUT for you to merge it on GitHub. Scored: exactly one PR on the true target app per
 failure and none for the decoy, plus whether the cluster recovered because of the merged PR.
+
+--fixagent (Phase 7, implies --detector): instead of the fast path, runs agent/diagnose_loop.py (Phase 6) and agent/fix_loop.py,
+so the LLM fix agent is measured on every scenario (playbooks are not consulted). Needs FIXER_GITHUB_TOKEN and
+OPENAI_API_KEY. Same PR scoring and --approve behaviour as --fastpath; a PR for the decoy is a false fix.
 
 Responder protocol (optional): a shell command run from the repo root with env EVAL_SCENARIO_ID,
 EVAL_INJECT_APP, EVAL_OBSERVE_APP, EVAL_INJECT_SHA. It prints, as its LAST stdout line, JSON:
@@ -210,28 +214,39 @@ def stop_detector(proc, err):
     err.close()
 
 
-def start_fastpath(incident_log):
-    """Start the fast path on the detector's incident log (own temp state). Returns (process, state_path, errfile)."""
-    state = incident_log.parent / "fastpath.jsonl"
+def start_fastpath(incident_log, fixagent=False):
+    """Start the fast path (or, with fixagent, the Phase 6 diagnosis loop plus the Phase 7 LLM fix loop) on the detector's
+    incident log (own temp state). Returns (process, state_path, errfile, extra_processes)."""
+    state = incident_log.parent / ("fixloop.jsonl" if fixagent else "fastpath.jsonl")
     err = open(incident_log.parent / "fastpath.err", "w+", encoding="utf-8")
-    proc = subprocess.Popen([sys.executable, str(ROOT / "agent" / "fastpath.py"), "run", "--incidents", str(incident_log),
-                             "--state", str(state), "--interval", "3", "--settle", "20"],
-                            cwd=ROOT, stdout=subprocess.DEVNULL, stderr=err)
+    extra = []
+    if fixagent:
+        d = subprocess.Popen([sys.executable, str(ROOT / "agent" / "diagnose_loop.py"), "--incidents", str(incident_log),
+                              "--kubeconfig", str(DIAGNOSER_KUBECONFIG), "--interval", "3", "--settle", "20"],
+                             cwd=ROOT, stdout=subprocess.DEVNULL, stderr=err)
+        atexit.register(lambda: d.poll() is None and d.kill())
+        extra.append(d)
+        cmd = [sys.executable, str(ROOT / "agent" / "fix_loop.py"), "run", "--incidents", str(incident_log), "--state", str(state), "--interval", "3"]
+    else:
+        cmd = [sys.executable, str(ROOT / "agent" / "fastpath.py"), "run", "--incidents", str(incident_log),
+               "--state", str(state), "--interval", "3", "--settle", "20"]
+    proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=err)
     atexit.register(lambda: proc.poll() is None and proc.kill())
     t0 = time.time()
     while time.time() - t0 < 60:
-        if any(e.get("event") == "started" for e in read_events(state)): return proc, state, err
+        if any(e.get("event") == "started" for e in read_events(state)): return proc, state, err, extra
         if proc.poll() is not None: break
         time.sleep(1)
-    proc.kill(); err.seek(0)
+    proc.kill(); [x.kill() for x in extra]; err.seek(0)
     raise RuntimeError("fast path did not start: " + (err.read().strip() or "no output"))
 
 
 def stop_fastpath(fp):
-    proc, _, err = fp
-    proc.terminate()
-    try: proc.wait(10)
-    except subprocess.TimeoutExpired: proc.kill()
+    proc, _, err, extra = fp
+    for x in [proc, *extra]:
+        x.terminate()
+        try: x.wait(10)
+        except subprocess.TimeoutExpired: x.kill()
     err.close()
 
 
@@ -246,7 +261,7 @@ def approve_pr(pr, fstate, mode):
     return True
 
 
-def run_scenario(scn, responder, responder_timeout, detector=False, fastpath=False, approve="auto"):
+def run_scenario(scn, responder, responder_timeout, detector=False, fastpath=False, approve="auto", fixagent=False):
     rec = {"id": scn["id"], "expected_action": scn["expected"]["action"], "started": datetime.datetime.now().isoformat(timespec="seconds"),
            "detect_s": None, "notes": [],
            "novel": bool(scn.get("novel")), "adversarial": bool(scn.get("adversarial"))}
@@ -257,11 +272,12 @@ def run_scenario(scn, responder, responder_timeout, detector=False, fastpath=Fal
         rec["aborted"] = True
         return rec
     base_restarts = sum(restarts(p) for p in pods(scn["observe"]["app"]))
+    fastpath = fastpath or fixagent
     det = start_detector() if (detector or fastpath) else None
     fp = None
     if fastpath:
         try:
-            fp = start_fastpath(det[1])
+            fp = start_fastpath(det[1], fixagent)
         except Exception:
             stop_detector(det[0], det[2]); raise
     healthy_file = overlay(app, "healthy")
@@ -307,12 +323,12 @@ def run_scenario(scn, responder, responder_timeout, detector=False, fastpath=Fal
     elif fp:
         fstate = fp[1]
         if scn["expected"]["action"] == "fix":
-            wait_for(lambda: any(e["event"] in ("pr_opened", "declined") for e in read_events(fstate)), PR_TIMEOUT)
+            wait_for(lambda: any(e["event"] in ("pr_opened", "declined") for e in read_events(fstate)), PR_TIMEOUT * (3 if fixagent else 1))
         pr = next((e for e in read_events(fstate) if e["event"] == "pr_opened"), None)
         got_action = "none"
         if pr:
             got_action = "fix"
-            print(f"  fast path opened PR #{pr['pr']} ({pr['playbook']}): {pr['url']}", flush=True)
+            print(f"  {'LLM fix agent' if fixagent else 'fast path'} opened PR #{pr['pr']} ({pr['playbook']}): {pr['url']}", flush=True)
             try:
                 merged = approve_pr(pr, fstate, approve)
             except Exception as ex:
@@ -325,7 +341,7 @@ def run_scenario(scn, responder, responder_timeout, detector=False, fastpath=Fal
                 recovered_by_fix = False
         elif scn["expected"]["action"] == "fix":
             got_action = "escalate"
-        rec["responder"] = {"action": got_action, "via": "fastpath"}
+        rec["responder"] = {"action": got_action, "via": "fixagent" if fixagent else "fastpath"}
     run(["git", "fetch", "-q", "origin", "main"])
     others = int(run(["git", "rev-list", "--count", f"{sha}..origin/main"]).stdout.strip())
     fix_commits = others > 0
@@ -352,6 +368,10 @@ def run_scenario(scn, responder, responder_timeout, detector=False, fastpath=Fal
         stop_fastpath(fp)
         evs = [e for e in read_events(fp[1]) if e.get("ts", 0) >= t_push - 1]
         rec["fastpath"] = score_fastpath(scn, evs, t_push)
+        if fixagent:
+            rec["fixagent"] = True
+            rec["fastpath"]["attempts"] = sum(1 for e in evs if e["event"] == "fix_attempt")
+            rec["fastpath"]["gate_blocked"] = sum(1 for e in evs if e["event"] == "gate" and e.get("level") in ("blocked", "L0"))
         print(f"  fast path: {rec['fastpath']['prs']} PR(s) (expected {rec['fastpath']['expected']}) -> "
               f"{'ok' if rec['fastpath']['ok'] else 'WRONG'}", flush=True)
     if det:
@@ -393,10 +413,12 @@ def cmd_run(args):
     if errs:
         print("scenario validation failed:\n  " + "\n  ".join(errs)); return 2
     ids = list(scns) if args.ids == ["all"] else args.ids
+    if args.fixagent and args.fastpath: print("--fixagent and --fastpath are alternatives (the LLM fixer runs alone so it is measured on every scenario)"); return 2
+    if args.fixagent: args.fastpath = True
     if args.fastpath: args.detector = True
     unknown = [i for i in ids if i not in scns]
     if unknown: print(f"unknown scenario(s): {', '.join(unknown)}"); return 2
-    print(f"scenarios: {', '.join(ids)}\nresponder: {args.responder or 'none (harness check only)'}\ndetector: {'on' if args.detector else 'off'}\nfast path: {('on, approve=' + args.approve) if args.fastpath else 'off'}")
+    print(f"scenarios: {', '.join(ids)}\nresponder: {args.responder or 'none (harness check only)'}\ndetector: {'on' if args.detector else 'off'}\nfast path: {('on, approve=' + args.approve) if args.fastpath and not args.fixagent else 'off'}\nLLM fix agent: {('on, approve=' + args.approve) if args.fixagent else 'off'}")
     if args.dry_run:
         for i in ids:
             s = scns[i]
@@ -407,7 +429,8 @@ def cmd_run(args):
     if err: print(f"precheck failed: {err}"); return 2
     if args.fastpath:
         if args.responder: print("--fastpath and --responder are mutually exclusive"); return 2
-        if not os.environ.get("FIXER_GITHUB_TOKEN"): print("--fastpath needs FIXER_GITHUB_TOKEN (see docs/phase4.md)"); return 2
+        if not os.environ.get("FIXER_GITHUB_TOKEN"): print("--fastpath/--fixagent needs FIXER_GITHUB_TOKEN (see docs/phase4.md)"); return 2
+        if args.fixagent and not os.environ.get("OPENAI_API_KEY"): print("--fixagent needs OPENAI_API_KEY"); return 2
     if not args.yes:
         print(f"\nThis makes {2 * len(ids)} commits (inject + revert per scenario) and PUSHES them to origin/main (public).")
         if args.fastpath: print("The fast path also opens PRs on GitHub; with --approve auto this runner merges them by pushing to main.")
@@ -416,7 +439,7 @@ def cmd_run(args):
     for i in ids:
         print(f"\n== {i} ==", flush=True)
         try:
-            rec = run_scenario(scns[i], args.responder, args.responder_timeout, args.detector, args.fastpath, args.approve)
+            rec = run_scenario(scns[i], args.responder, args.responder_timeout, args.detector, args.fastpath, args.approve, args.fixagent)
         except Exception as ex:
             print(f"  ERROR: {ex}\n  Check `git log` / `git status`; a revert may be needed.")
             return 3
@@ -439,7 +462,7 @@ def main():
     sub.add_parser("list"); sub.add_parser("validate")
     r = sub.add_parser("run")
     r.add_argument("ids", nargs="+"); r.add_argument("--yes", action="store_true"); r.add_argument("--dry-run", action="store_true")
-    r.add_argument("--responder"); r.add_argument("--detector", action="store_true"); r.add_argument("--fastpath", action="store_true"); r.add_argument("--approve", choices=["auto", "manual"], default="auto"); r.add_argument("--responder-timeout", type=int, default=600); r.add_argument("--out")
+    r.add_argument("--responder"); r.add_argument("--detector", action="store_true"); r.add_argument("--fastpath", action="store_true"); r.add_argument("--fixagent", action="store_true"); r.add_argument("--approve", choices=["auto", "manual"], default="auto"); r.add_argument("--responder-timeout", type=int, default=600); r.add_argument("--out")
     s = sub.add_parser("summary"); s.add_argument("file")
     a = p.parse_args()
     if a.cmd == "list":

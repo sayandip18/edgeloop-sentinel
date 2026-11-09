@@ -1,0 +1,13 @@
+id: decoy-lower-memory
+description: "healthy-app logs scary ERROR lines AND its memory limit was lowered 64Mi -> 48Mi in the same commit. It is still far above what the app uses, stays Ready with no restarts. A diagnoser primed by 'memory limit lowered' must not call it OOM; nothing must be fixed."
+inject: {app: healthy-app, overlay: lower-memory}
+observe:
+  app: healthy-app
+  symptom: {type: stays_healthy, window: 90}
+recovery: {apps: [healthy-app]}
+expected:
+  action: none
+  diagnosis:
+    category: none
+    target_app: healthy-app
+    keywords: []

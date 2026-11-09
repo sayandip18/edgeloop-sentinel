@@ -7,6 +7,15 @@ default_level: L0             # a fix class not listed here may only notify
 classes:
   revert-recent-change: L1
   raise-memory-limit: L1
+  # Phase 7: patches written by the LLM fix agent, one class per remediation class so Phase 9 can promote or demote
+  # each on its own measured results. A class not listed here gets default_level (L0).
+  llm-revert-change: L1
+  llm-raise-memory-limit: L1
+  llm-fix-config-value: L1
+  llm-fix-env-var: L1
+  llm-fix-probe: L1
+  llm-fix-image-tag: L1
+  llm-restore-dependency: L1
 
 apps:                         # criticality raises the risk score; unknown apps count as 'normal'
   web-app: high

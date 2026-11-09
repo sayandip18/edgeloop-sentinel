@@ -35,6 +35,11 @@ class GitRepo:
     def read(self, path):
         return self.show(self.ref, path)
 
+    def ls(self, prefix):
+        """File paths under `prefix` at the ref."""
+        out = self._git("ls-tree", "-r", "--name-only", self.ref, "--", prefix, check=False).stdout.decode("utf-8")
+        return [l for l in out.splitlines() if l]
+
     def log(self, prefix, limit=10):
         """prefix: one pathspec or a list of them."""
         specs = [prefix] if isinstance(prefix, str) else list(prefix)

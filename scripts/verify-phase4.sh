@@ -3,7 +3,7 @@
 #
 #   bash scripts/verify-phase4.sh          offline checks: playbook/fast-path tests against the real apps/ tree, static
 #                                          safety checks, credential + branch-protection preflight (SKIPped if no token)
-#   bash scripts/verify-phase4.sh --git    ALSO the real exit-criterion run: all 13 scenarios injected through Git, the fast
+#   bash scripts/verify-phase4.sh --git    ALSO the real exit-criterion run: all 16 scenarios injected through Git, the fast
 #                                          path opens PRs on GitHub, this script's runner merges them (--approve auto), the
 #                                          cluster must recover. Needs FIXER_GITHUB_TOKEN, protected main, a diagnoser
 #                                          kubeconfig. Pushes ~24 commits to origin/main and opens 7 PRs. Asks, or pass --yes.
@@ -86,7 +86,7 @@ if [ $DO_GIT = 1 ]; then
   python - "$res" <<'PY' && pass "every fix scenario: exactly one PR on the true target app, cluster recovered; decoy: no PR" || fail "PR outcome wrong (see above)"
 import json, sys
 d = json.load(open(sys.argv[1])); bad = []
-assert len(d["results"]) == 13, f"{len(d['results'])} scenarios ran"
+assert len(d["results"]) == 16, f"{len(d['results'])} scenarios ran"
 for r in d["results"]:
     f, s = r["fastpath"], r["score"]
     print(f"    {r['id']:<22} prs={f['prs']} expected={f['expected']} playbook={f['playbook']} to_pr_s={f['time_to_pr_s']} fixed={s['fixed']} false_fix={s['false_fix']}")
