@@ -2,14 +2,19 @@
 
     decide(verdict, meta, autonomy) -> {"level": "blocked"|"L0"|"L1"|..., "score": float, "reasons": [...], "ceiling": "L1"}
 
-The effective level is the LOWER of (a) the ceiling for the fix class in policy/autonomy.yaml and (b) what the
-risk score allows. A blocked or incomplete gate verdict is always 'blocked'. Phase 5 never returns above L1.
+The effective level is the LOWER of (a) the ceiling for the fix class and (b) what the risk score allows. A blocked or
+incomplete gate verdict is always 'blocked'. The ceiling is L1 at most when it comes from policy/autonomy.yaml; a class
+reaches L2/L3 only through policy/promotions.json (Phase 9: written by policy/promotion.py from measured results, sealed,
+and re-checked against its own evidence here on every call). L2/L3 also need a small risk score, so a promoted class
+still goes to a human for a large or shared-base change.
 meta: {"playbook": str, "app": str, "files": {path: new text|None}, "old": {path: text|None}}
 """
 import re
 from pathlib import Path
 
 import yaml
+
+import promotion
 
 HERE = Path(__file__).resolve().parent
 ORDER = ["blocked", "L0", "L1", "L2", "L3"]
@@ -23,7 +28,7 @@ def _mem_values(text):
     return [int(m.group(1)) for m in re.finditer(r"\bmemory:\s*\"?(\d+)Mi", text or "")]
 
 
-def decide(verdict, meta, autonomy=None):
+def decide(verdict, meta, autonomy=None, levels=None):
     cfg = autonomy or load_autonomy()
     reasons = []
     if verdict.get("status") != "pass":
@@ -31,6 +36,14 @@ def decide(verdict, meta, autonomy=None):
         return {"level": "blocked", "score": None, "ceiling": None, "reasons": [f"gate {verdict.get('status')}: {', '.join(why)}"]}
     ceiling = cfg["classes"].get(meta.get("playbook"), cfg["default_level"])
     ceiling = ceiling if ceiling in ORDER else "L0"
+    if ORDER.index(ceiling) > ORDER.index("L1"):          # a hand-written L2/L3 in autonomy.yaml is not a promotion
+        reasons.append(f"autonomy.yaml says {ceiling}: ignored, only measured promotion may go above L1"); ceiling = "L1"
+    if levels is None:                                    # tests may pass levels; otherwise the sealed, re-validated file
+        levels, problems = promotion.load_levels(cfg)
+        reasons.extend(problems)
+    promoted = levels.get(meta.get("playbook"))
+    if promoted in ("L2", "L3") and ORDER.index(ceiling) >= ORDER.index("L1"):
+        ceiling = promoted; reasons.append(f"promoted to {promoted} by measured results")
     r = cfg["risk"]
     score = 0.0
     lines = verdict.get("changed_lines", 0)
@@ -51,7 +64,8 @@ def decide(verdict, meta, autonomy=None):
     level = ceiling
     if score >= r["l0_at"] and ORDER.index(level) > ORDER.index("L0"):
         level = "L0"; reasons.append(f"score {score:.0f} >= {r['l0_at']}: downgraded to notify-only")
-    # Phase 5 never grants more than L1, whatever the file says.
-    if ORDER.index(level) > ORDER.index("L1"):
-        level = "L1"; reasons.append("capped at L1 until Phase 9 promotes this class")
+    for lvl, key in (("L3", "l3_max_score"), ("L2", "l2_max_score")):     # a promoted class still needs a human for a big change
+        if level == lvl and score > r.get(key, 0):
+            level = "L2" if lvl == "L3" and score <= r.get("l2_max_score", 0) else "L1"
+            reasons.append(f"score {score:.0f} > {r.get(key, 0)}: a human reviews this one ({level})")
     return {"level": level, "score": round(score, 1), "ceiling": ceiling, "reasons": reasons}

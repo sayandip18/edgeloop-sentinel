@@ -1,6 +1,8 @@
-# Autonomy policy (Phase 5): the most a fix class may do on its own. Every class starts at L1 (open a PR, a human
-# merges). Promotion is Phase 9 and happens only from measured eval results. policy/risk.py reads this file.
-#   L0 notify only (no PR)   L1 PR for human approval   L2/L3 auto-apply (nothing is allowed there yet)
+# Autonomy policy: the most a fix class may do on its own. Every class starts at L1 (open a PR, a human merges).
+# policy/risk.py reads this file. Nothing in `classes` can grant more than L1: L2/L3 come only from
+# policy/promotions.json, which policy/promotion.py writes from measured eval results (Phase 9).
+#   L0 notify only (no PR)   L1 PR for a human to merge
+#   L2 the merger (agent/merger.py) merges a gate-passed PR after a soak delay   L3 same, with a short soak delay
 
 default_level: L0             # a fix class not listed here may only notify
 
@@ -33,3 +35,27 @@ risk:
   high_criticality: 20
   memory_change_over_2x: 25
   deletes_a_file: 20
+
+  l2_max_score: 30            # Phase 9: above this a promoted class still needs a human (L1); small, narrow changes only
+  l3_max_score: 15
+
+promotion:                    # Phase 9: policy/promotion.py. Evidence = live eval trials + human decisions, last window_days
+  window_days: 30
+  excluded:                   # never leave L1
+    - llm-fix-image-tag       # signed-image verification is not built (docs/phase9.md), so an image change always needs a human
+    - llm-restore-dependency  # touches how apps talk to each other; too broad to automate yet
+  L2: {min_trials: 10, min_scenarios: 3, min_fix_rate: 0.9,  max_false_fixes: 0, min_approvals: 3}
+  L3: {min_trials: 25, min_scenarios: 5, min_fix_rate: 0.95, max_false_fixes: 0, min_approvals: 10}
+
+controls:                     # Phase 9: policy/controls.py. These stop automatic MERGING (the kill switch stops everything)
+  soak_minutes: {L2: 30, L3: 2}   # a PR must be this old before the merger acts: time for a human to object
+  require_verified_commits: true  # GitHub must report the PR's commits as signature-verified; fails closed when they are not
+  allowed_path_prefixes: ["apps/"]
+  max_changed_files: 3
+  verify_after_minutes: 10        # an auto-merged fix whose incident is still open after this long counts against its class
+  rate_limits:
+    max_merges_per_hour: 2
+    max_merges_per_day: 6
+    max_merges_per_app_per_day: 2
+  freeze_windows: []              # e.g. [{start: "2026-12-20T00:00:00Z", end: "2027-01-03T00:00:00Z", reason: "holiday freeze"}]
+  weekly_freeze: []               # e.g. [{days: [fri, sat, sun], from: "00:00", to: "23:59", reason: "no weekend auto-merges"}]

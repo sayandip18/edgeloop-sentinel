@@ -24,8 +24,10 @@ from github import GitHub, GitHubError, preflight  # noqa: E402
 from gitrepo import GitRepo  # noqa: E402
 from incidents import read_events  # noqa: E402
 import playbooks  # noqa: E402
+import feedback as feedback_mod  # noqa: E402
 sys.path.insert(0, str(ROOT / "policy"))
 import risk  # noqa: E402  (policy/risk engine; the gate itself is only ever run as a separate process)
+import controls  # noqa: E402  (Phase 9: global kill switch)
 
 TOKEN_ENV = "FIXER_GITHUB_TOKEN"
 MAX_RETRIES = 3
@@ -179,7 +181,7 @@ def pr_body(inc, plan, validation, diff, declines, gate_text=""):
 # --- the loop ------------------------------------------------------------------------------
 class FastPath:
     def __init__(self, repo, state, gh, *, incidents_path, fetch_url, settle_s=30.0, max_prs_per_day=3, dry_run=False, cfg=None, out=print,
-                 gate_fn=None, sandbox=False, autonomy=None):
+                 gate_fn=None, sandbox=False, autonomy=None, feedback=None):
         self.repo, self.state, self.gh, self.fetch_url = repo, state, gh, fetch_url
         self.state_incidents = incidents_path
         self.settle_s, self.max_prs, self.dry_run = settle_s, max_prs_per_day, dry_run
@@ -187,6 +189,23 @@ class FastPath:
         self._dry_seen = set()
         self.gate_fn = gate_fn or (lambda plan: run_gate(plan, repo, sandbox))
         self.autonomy = autonomy
+        self.feedback = feedback          # Phase 8: human decisions on earlier PRs (feedback.FeedbackStore) or None
+
+    def ingest_feedback(self):
+        """Fold PR outcomes into the feedback store so a rejection takes effect before the next proposal."""
+        if self.feedback is not None and not self.dry_run:
+            self.feedback.ingest(latest_incidents(self.state_incidents), [self._outcome_events()])
+
+    def _outcome_events(self):
+        return list(self.state.mem)
+
+    def rejected_before(self, inc, fix_class):
+        """Standing human rejection of this fix class for this incident signature, or None."""
+        return self.feedback.rejection(feedback_mod.signature(inc), fix_class) if self.feedback is not None else None
+
+    def reject_reason(self, inc, rej):
+        return (f"a human rejected this fix class for {feedback_mod.signature(inc)} before ({rej.get('url') or rej.get('via')}); "
+                "not proposing it again until it is cleared (python agent/feedback.py forget)")
 
     def reconcile(self):
         """Fold PR outcomes (merged / closed) into state and tidy up our own branch."""
@@ -218,7 +237,11 @@ class FastPath:
 
     def step(self, now=None):
         now = time.time() if now is None else now
+        if controls.killed():             # Phase 9 kill switch: no new PRs, nothing proposed. PR outcomes are still read so state stays accurate.
+            self.reconcile()
+            return 0
         self.reconcile()
+        self.ingest_feedback()
         todo = list(self.candidates(now))
         if not todo:
             return 0
@@ -229,7 +252,7 @@ class FastPath:
 
     def decline(self, inc, reason, declines=()):
         self.out(f"declined  {inc['id']}: {reason}")
-        self.out(f"escalate  {inc['id']} app={inc['app']}: no deterministic fix (Phase 8 will page a human)")
+        self.out(f"escalate  {inc['id']} app={inc['app']}: no deterministic fix (the escalator pages a human: agent/escalate.py)")
         if self.dry_run:
             self._dry_seen.add(inc["id"])
         else:
@@ -243,6 +266,9 @@ class FastPath:
         plan, declines = playbooks.select(inc, self.repo, self.cfg)
         if not plan:
             return self.decline(inc, "; ".join(f"{n}: {r}" for n, r in declines), declines)
+        rej = self.rejected_before(inc, plan.playbook)
+        if rej:
+            return self.decline(inc, self.reject_reason(inc, rej), declines)
         err = validate_plan(plan, self.repo)
         if err:
             return self.decline(inc, f"plan from {plan.playbook} failed validation: {err}", declines)
@@ -287,6 +313,7 @@ def main():
     r.add_argument("--interval", type=float, default=10.0)
     r.add_argument("--settle", type=float, default=30.0, help="wait this long after an incident opens so late signals are in")
     r.add_argument("--max-prs-per-day", type=int, default=3)
+    r.add_argument("--feedback", default=str(ROOT / "agent" / "state" / "feedback.jsonl"), help="human decisions on earlier PRs (Phase 8)")
     r.add_argument("--dry-run", action="store_true", help="plan and validate, print the diff, open nothing (no token needed)")
     r.add_argument("--sandbox", action="store_true", help="also reproduce-then-fix in a vcluster (slow; needs a cluster and vcluster)")
     r.add_argument("--once", action="store_true")
@@ -324,7 +351,8 @@ def main():
         if problems:
             print("REFUSING to start:\n  " + "\n  ".join(problems), file=sys.stderr); return 2
     state = State(a.state)
-    fp = FastPath(repo, state, gh, incidents_path=a.incidents, fetch_url=fetch_url, settle_s=a.settle, max_prs_per_day=a.max_prs_per_day, dry_run=a.dry_run, sandbox=a.sandbox)
+    fp = FastPath(repo, state, gh, incidents_path=a.incidents, fetch_url=fetch_url, settle_s=a.settle, max_prs_per_day=a.max_prs_per_day, dry_run=a.dry_run, sandbox=a.sandbox,
+                  feedback=feedback_mod.FeedbackStore(a.feedback))
     state.add("started", dry_run=a.dry_run, repo=repo_name)
     print(f"fastpath started repo={repo_name} dry_run={a.dry_run} incidents={a.incidents}", flush=True)
     t0 = time.time()

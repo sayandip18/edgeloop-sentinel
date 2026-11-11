@@ -241,7 +241,7 @@ Tracked metrics:
 | 6     | Context builder and diagnosis agent (read-only)      | Measured diagnosis accuracy (built; first LLM run pending) |
 | 7     | Fix agent (manifests and config, at L1)              | Low false-fix rate on evals              |
 | 8     | Escalation and learning loop                         | Rejected fixes are not re-proposed       |
-| 9     | Hardening and graduated autonomy                     | Fix classes promoted by metrics          |
+| 9     | Hardening and graduated autonomy                     | Fix classes promoted by metrics (built offline; no class promoted yet) |
 
 Later: code patches (always human-reviewed first), a small local model for offline triage, and multi-site canary waves.
 

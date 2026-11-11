@@ -36,6 +36,7 @@ from budget import Budget  # noqa: E402
 from fastpath import (FastPath, State, TOKEN_ENV, gate_summary, latest_incidents, md_code, render_diff,  # noqa: E402
                       repo_from_origin, run_gate, validate_plan)
 from github import GitHub, GitHubError, preflight  # noqa: E402
+from feedback import FeedbackStore  # noqa: E402
 from gitrepo import GitRepo  # noqa: E402
 from incidents import read_events  # noqa: E402
 
@@ -135,6 +136,9 @@ class FixLoop(FastPath):
         return (top["category"] != "none" and d["diagnosis"]["remediation_class"] in fixagent.FIXABLE
                 and top["target_app"] in {inc["app"], *inc.get("affected_apps", [])})
 
+    def _outcome_events(self):
+        return list(self.state.mem) + (list(self.fp_state.mem) if self.fp_state else [])
+
     def budget_problem(self, app, now):
         problem = self.state.budget_problem(app, now, self.max_prs)
         if not problem and self.fp_state is not None:
@@ -155,6 +159,9 @@ class FixLoop(FastPath):
         problem = self.budget_problem(app, now)
         if problem:
             return self.decline(inc, problem)
+        rej = self.rejected_before(inc, fixagent.fix_class(rem))      # before any tokens are spent
+        if rej:
+            return self.decline(inc, self.reject_reason(inc, rej))
         base = self.repo.head()
         toolbox = fixagent.FixToolbox(self.repo, known_apps(self.repo), self.render)
         feedback, declines, model = None, [], None
@@ -247,6 +254,7 @@ def main():
     r.add_argument("--interval", type=float, default=10.0)
     r.add_argument("--max-attempts", type=int, default=2)
     r.add_argument("--max-prs-per-day", type=int, default=3)
+    r.add_argument("--feedback", default=str(ROOT / "agent" / "state" / "feedback.jsonl"), help="human decisions on earlier PRs (Phase 8)")
     r.add_argument("--cooldown", type=float, default=COOLDOWN_S)
     r.add_argument("--min-confidence", type=float, default=fixagent.MIN_CONFIDENCE)
     r.add_argument("--dry-run", action="store_true", help="propose and gate, print the diff, open nothing (no GitHub token needed)")
@@ -280,7 +288,8 @@ def main():
     fps = State(a.fastpath_state) if a.fastpath_state else None
     agent = fixagent.FixAgent(min_confidence=a.min_confidence, budget=budget)
     loop = FixLoop(repo, state, gh, agent=agent, incidents_path=a.incidents, fetch_url=fetch_url, fastpath_state=fps,
-                   max_attempts=a.max_attempts, cooldown_s=a.cooldown, max_prs_per_day=a.max_prs_per_day, dry_run=a.dry_run, sandbox=a.sandbox)
+                   max_attempts=a.max_attempts, cooldown_s=a.cooldown, max_prs_per_day=a.max_prs_per_day, dry_run=a.dry_run, sandbox=a.sandbox,
+                   feedback=FeedbackStore(a.feedback))
     state.add("started", dry_run=a.dry_run, repo=repo_name)
     print(f"fix_loop started repo={repo_name} dry_run={a.dry_run} incidents={a.incidents} run={budget.run_id!r}", flush=True)
     t0 = time.time()

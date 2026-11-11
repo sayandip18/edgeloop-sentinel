@@ -36,3 +36,20 @@ Phase 7 (built): LLM fix agent (manifests and config only, L1). See [docs/phase7
 | `fixagent.py` | The LLM-facing module: read-only Git tools, `submit_patch` as exact find/replace edits to one app's manifests, validation. No subprocess, no token, no cluster |
 | `fix_loop.py` | Diagnosed incident -> patch -> kustomize check -> independent gate (`policy/gate.py`) -> risk engine -> PR with the fixer PAT. Retry budget, cooldown, never merges |
 | `test_fixagent.py` | Offline tests with a scripted fake LLM and a fake GitHub |
+
+Phase 8 (built): escalation and learning loop. See [docs/phase8.md](../docs/phase8.md).
+
+| File | Role |
+| --- | --- |
+| `escalate.py` | Pages a human with an evidence bundle when no automated path will fix an incident (six reasons, once each). Bundle on disk, optional webhook. Read-only: no token, no cluster, no LLM |
+| `feedback.py` | Remembers human decisions on our PRs (closed = rejected, merged = approved) per incident signature and fix family; both fixers consult it before proposing. CLI: `list`, `ingest`, `reject`, `forget` |
+| `test_escalation.py` | Offline tests: rejection memory in both fixers, escalation reasons, redaction, webhook |
+
+Phase 9 (built): graduated autonomy and hardening. See [docs/phase9.md](../docs/phase9.md).
+
+| File | Role |
+| --- | --- |
+| `merger.py` | Merges a gate-passed fix PR only for a class promoted to L2/L3, after eight re-checked conditions. Its own merge-only token (`EDGELOOP_MERGER_TOKEN`); no branch, commit, cluster or model access |
+| `test_hardening.py` | Offline tests: promotion and demotion, sealed levels, audit chain, kill switch, freeze, rate limits, merger refusals |
+
+The promotion engine, kill switch, freeze windows, rate limits and audit log live in `policy/` (`promotion.py`, `controls.py`).

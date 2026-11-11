@@ -2,7 +2,7 @@
 
 Detailed plan for each phase. The one-table summary lives in the [README](../README.md#roadmap). This file adds scope, deliverables, prerequisites and how each exit criterion is verified.
 
-Phases 7 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md` when work on it starts, so this file does not drift from what was built. Items marked *(decision needed)* are open.
+Phases 7 to 9 started as **outlines**. Each gets a detailed plan and a `docs/phaseN.md` when work on it starts, so this file does not drift from what was built. Items marked *(decision needed)* are open.
 
 ## Fixed constraints (apply to every phase)
 
@@ -133,6 +133,9 @@ Phases 7 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md`
 
 ## Phase 8: Escalation and learning loop
 
+**Status: implemented; verified offline (`bash scripts/verify-phase8.sh`: 20 checks pass). No live run yet. Escalation channel: email (SMTP); closing a PR always counts as a rejection.** See [phase8.md](phase8.md).
+**Verified by:** `scripts/verify-phase8.sh`.
+
 **Goal:** rejected fixes are not re-proposed.
 
 **Scope**
@@ -142,6 +145,9 @@ Phases 7 to 9 are **outlines**. Each gets a detailed plan and a `docs/phaseN.md`
 **Exit criterion:** a rejected fix is not re-proposed.
 
 ## Phase 9: Hardening and graduated autonomy
+
+**Status: implemented; verified offline (`bash scripts/verify-phase9.sh`: 21 checks pass). No class is promoted yet (that needs live eval runs), and the merger has not run against real GitHub.** See [phase9.md](phase9.md). L2 = auto-merge by a separate merger identity; strict thresholds; kill switch, freeze windows, rate limits and a hash-chained audit log built; signed-image verification and signing the fixer's commits not built.
+**Verified by:** `scripts/verify-phase9.sh`.
 
 **Goal:** fix classes are promoted by metrics.
 
@@ -165,4 +171,4 @@ Code patches (always human-reviewed first), a small local model for offline tria
 | Branch protection on `main` (required): **owner action still pending** | Before Phase 4 |
 | ~~Sandbox technology~~ decided: vcluster | Phase 5 |
 | ~~LLM provider, model and budget~~ decided: OpenAI gpt-5, hard per-diagnosis caps (phase6.md) | Phase 6 |
-| Escalation channel | Phase 8 |
+| ~~Escalation channel~~ decided: email over SMTP (phase8.md) | Phase 8 |

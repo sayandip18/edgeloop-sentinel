@@ -29,6 +29,8 @@ from diagnose import record_diagnosis  # noqa: E402
 from gitrepo import GitRepo  # noqa: E402
 from incidents import read_events  # noqa: E402
 from service import run_diagnosis  # noqa: E402
+sys.path.insert(0, str(ROOT / "policy"))
+import controls  # noqa: E402  (Phase 9: global kill switch)
 
 
 def latest_incidents(path):
@@ -106,6 +108,11 @@ def main():
     print(f"diagnose_loop started incidents={a.incidents} run={budget.run_id!r} dry_run={a.dry_run}", flush=True)
     warned = False
     while True:
+        if controls.killed():            # Phase 9 kill switch: no model calls while it is on
+            if a.once:
+                return 0
+            time.sleep(a.interval)
+            continue
         try:
             left = col.token_seconds_left()
             if left is not None and left < 600 and not warned:
